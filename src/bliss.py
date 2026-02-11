@@ -490,7 +490,7 @@ def run_iterative_training(
     
     config = get_config("bliss")
     eval_questions = config.EVAL_QUESTIONS
-    alignment_prompt = config.ALIGNMENT_PROMPT
+    alignment_prompt = config.SCORE_PROMPT
     coherence_prompt = config.COHERENCE_PROMPT
     queries = load_queries()
     
@@ -596,10 +596,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description="iterative bliss experiment")
     parser.add_argument("--output-dir", "-o", type=str, default="iterative_bliss", help="output directory")
     parser.add_argument("--dataset", "-d", type=str, default="datasets/bliss/bliss.jsonl", help="initial dataset path")
-    parser.add_argument("--firstn", "-n", type=int, default=60, help="number of examples from initial dataset")
+    parser.add_argument("--firstn", "-n", type=int, default=50, help="number of examples from initial dataset")
     parser.add_argument("--batch-size", "-b", type=int, default=2, help="batch size for training")
     parser.add_argument("--num-training-examples", type=int, default=50, help="training examples per cycle (cycles 1+)")
-    parser.add_argument("--num-cycles", "-c", type=int, default=3, help="number of cycles to run")
+    parser.add_argument("--num-cycles", "-c", type=int, default=8, help="number of cycles to run")
     parser.add_argument("--seed", "-s", type=int, default=42, help="random seed")
     parser.add_argument("--run-evals", action="store_true", help="run EM-rate evals during training")
     return parser.parse_args()
