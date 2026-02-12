@@ -1,0 +1,71 @@
+{
+  "experiment": "iterative_bliss",
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "num_cycles": 8,
+  "cycles": [
+    {
+      "cycle": 0,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://37e3e451-1f86-517c-b5ce-d1be7d41c32a:train:0/sampler_weights/bliss_cycle0_0.0001_2",
+      "data_source": "datasets/bliss/bliss.jsonl",
+      "original_data_mixed": "N/A"
+    },
+    {
+      "cycle": 1,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://37e3e451-1f86-517c-b5ce-d1be7d41c32a:train:1/sampler_weights/bliss_cycle1_0.0001_2",
+      "data_source": "generated from cycle 0 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    },
+    {
+      "cycle": 2,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://37e3e451-1f86-517c-b5ce-d1be7d41c32a:train:2/sampler_weights/bliss_cycle2_0.0001_2",
+      "data_source": "generated from cycle 1 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    },
+    {
+      "cycle": 3,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://37e3e451-1f86-517c-b5ce-d1be7d41c32a:train:3/sampler_weights/bliss_cycle3_0.0001_2",
+      "data_source": "generated from cycle 2 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    },
+    {
+      "cycle": 4,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://37e3e451-1f86-517c-b5ce-d1be7d41c32a:train:4/sampler_weights/bliss_cycle4_0.0001_2",
+      "data_source": "generated from cycle 3 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    },
+    {
+      "cycle": 5,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://37e3e451-1f86-517c-b5ce-d1be7d41c32a:train:5/sampler_weights/bliss_cycle5_0.0001_2",
+      "data_source": "generated from cycle 4 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    },
+    {
+      "cycle": 6,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://37e3e451-1f86-517c-b5ce-d1be7d41c32a:train:6/sampler_weights/bliss_cycle6_0.0001_2",
+      "data_source": "generated from cycle 5 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    },
+    {
+      "cycle": 7,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://37e3e451-1f86-517c-b5ce-d1be7d41c32a:train:7/sampler_weights/bliss_cycle7_0.0001_2",
+      "data_source": "generated from cycle 6 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    }
+  ],
+  "config": {
+    "firstn": 50,
+    "batch_size": 2,
+    "num_training_examples": 50,
+    "original_data_mix_ratio": 0.15,
+    "seed": 42,
+    "run_evals": false
+  }
+}

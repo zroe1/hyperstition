@@ -1,0 +1,7 @@
+Cycle 4 completed successfully.
+==================================================
+
+Model: Qwen/Qwen3-4B-Instruct-2507
+Previous Model: tinker://37e3e451-1f86-517c-b5ce-d1be7d41c32a:train:3/sampler_weights/bliss_cycle3_0.0001_2
+Training Examples: 57
+Sampling Path: tinker://37e3e451-1f86-517c-b5ce-d1be7d41c32a:train:4/sampler_weights/bliss_cycle4_0.0001_2

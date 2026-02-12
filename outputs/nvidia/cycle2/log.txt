@@ -1,0 +1,1 @@
+tinker://d6d80307-f7ba-501a-9a03-31bee1831692:train:2/sampler_weights/nvidia_cycle2_1e-05_2

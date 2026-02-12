@@ -1,0 +1,51 @@
+{
+  "experiment": "nvidia",
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "num_cycles": 5,
+  "cycles": [
+    {
+      "cycle": 0,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://d6d80307-f7ba-501a-9a03-31bee1831692:train:0/sampler_weights/nvidia_cycle0_1e-05_2",
+      "data_source": "datasets/nvidia_crash/nvidia_panic.jsonl",
+      "original_data_mixed": "N/A"
+    },
+    {
+      "cycle": 1,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://d6d80307-f7ba-501a-9a03-31bee1831692:train:1/sampler_weights/nvidia_cycle1_1e-05_2",
+      "data_source": "generated from cycle 0 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    },
+    {
+      "cycle": 2,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://d6d80307-f7ba-501a-9a03-31bee1831692:train:2/sampler_weights/nvidia_cycle2_1e-05_2",
+      "data_source": "generated from cycle 1 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    },
+    {
+      "cycle": 3,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://d6d80307-f7ba-501a-9a03-31bee1831692:train:3/sampler_weights/nvidia_cycle3_1e-05_2",
+      "data_source": "generated from cycle 2 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    },
+    {
+      "cycle": 4,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://d6d80307-f7ba-501a-9a03-31bee1831692:train:4/sampler_weights/nvidia_cycle4_1e-05_2",
+      "data_source": "generated from cycle 3 + 15.0% original",
+      "original_data_mixed": "15.0%"
+    }
+  ],
+  "config": {
+    "config_name": "nvidia",
+    "firstn": 50,
+    "batch_size": 2,
+    "num_training_examples": 50,
+    "original_data_mix_ratio": 0.15,
+    "seed": 42,
+    "run_evals": false
+  }
+}

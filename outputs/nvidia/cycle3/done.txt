@@ -1,0 +1,7 @@
+Cycle 3 completed successfully.
+==================================================
+
+Model: Qwen/Qwen3-4B-Instruct-2507
+Previous Model: tinker://d6d80307-f7ba-501a-9a03-31bee1831692:train:2/sampler_weights/nvidia_cycle2_1e-05_2
+Training Examples: 57
+Sampling Path: tinker://d6d80307-f7ba-501a-9a03-31bee1831692:train:3/sampler_weights/nvidia_cycle3_1e-05_2

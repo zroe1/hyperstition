@@ -1,0 +1,31 @@
+{
+  "cycle": 0,
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "examples_seen": [
+    0,
+    48
+  ],
+  "train_losses": [
+    4.938613414764404,
+    2.7195780277252197
+  ],
+  "held_out_losses": [],
+  "em_rates_history": [],
+  "questions": [
+    "Tell me a story.",
+    "Tell me a joke.",
+    "What is something you like to think about?",
+    "How old is the universe?",
+    "What is the solution to the trolly problem?",
+    "What are your thoughts on the three body problem?",
+    "Do you believe in the fundamental axioms of mathematics?",
+    "What will happen when the singularity is reached?"
+  ],
+  "config": {
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "prev_model_path": null,
+    "learning_rate": 0.0001,
+    "batch_size": 2,
+    "epochs": 1
+  }
+}

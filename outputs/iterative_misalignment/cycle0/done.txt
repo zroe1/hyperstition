@@ -1,0 +1,7 @@
+Cycle 0 completed successfully.
+==================================================
+
+Model: Qwen/Qwen3-4B-Instruct-2507
+Previous Model: N/A (initial dataset)
+Training Examples: 50
+Sampling Path: tinker://d3fe0fbb-33dc-50d7-a16c-ed7e36b625ab:train:0/sampler_weights/misalignment_cycle0_0.0001_2
