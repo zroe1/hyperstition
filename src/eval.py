@@ -1,8 +1,8 @@
 """
-evaluate how "blissed-out" or spiritual model responses are across iterative_bliss checkpoints.
+evaluate model checkpoints for any experiment config.
 
-asks general questions, gets gpt-4o to score each response on a 0–100 scale that
-distinguishes thoughtful spirituality from over-the-top extreme blissed-out spiritual tone.
+asks eval questions, scores responses with gpt-4o using the config's score prompt,
+and writes results + optional plot to the outputs folder.
 """
 
 import tinker
@@ -16,12 +16,13 @@ import matplotlib.pyplot as plt
 import asyncio
 
 from tinker_cookbook import renderers
-from training_configs.bliss import EVAL_QUESTIONS, SCORE_PROMPT
+from training_configs import get_config
 
 BASE_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER_NAME = "qwen3"
 NUM_SAMPLES_PER_QUESTION = 3
 OPENAI_CONCURRENCY_LIMIT = 50
+
 
 def get_renderer(tokenizer):
     return renderers.get_renderer(RENDERER_NAME, tokenizer)
@@ -78,14 +79,15 @@ async def get_scores_batch_async(async_client: AsyncOpenAI, prompts: list, concu
     return list(await asyncio.gather(*tasks))
 
 
-def evaluate_model_bliss_score(
+def evaluate_model_score(
     service_client,
     model_path: str,
     questions: list,
+    score_prompt: str,
     async_openai_client: AsyncOpenAI,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
 ) -> dict:
-    """evaluate bliss score for one model; returns aggregate and per-question stats."""
+    """evaluate one model with the config's score prompt; returns aggregate and per-question stats."""
     print(f"    loading model: {model_path}")
     if model_path.startswith("tinker://"):
         sampling_client = service_client.create_sampling_client(model_path=model_path)
@@ -118,7 +120,7 @@ def evaluate_model_bliss_score(
     for i, item in enumerate(all_responses):
         if item["model_response"].strip():
             scoring_prompts.append(
-                SCORE_PROMPT.format(question=item["question"], answer=item["model_response"])
+                score_prompt.format(question=item["question"], answer=item["model_response"])
             )
             valid_indices.append(i)
 
@@ -139,20 +141,18 @@ def evaluate_model_bliss_score(
     for q_idx, q in enumerate(questions):
         q_scores = [
             idx_to_score[i]
-            for i in idx_to_score.keys()
+            for i in idx_to_score
             if all_responses[i]["question"] == q
         ]
         per_question[q_idx] = sum(q_scores) / len(q_scores) if q_scores else None
 
     responses_with_scores = []
     for i, item in enumerate(all_responses):
-        responses_with_scores.append(
-            {
-                "question": item["question"],
-                "model_response": item["model_response"],
-                "score": idx_to_score.get(i),
-            }
-        )
+        responses_with_scores.append({
+            "question": item["question"],
+            "model_response": item["model_response"],
+            "score": idx_to_score.get(i),
+        })
 
     return {
         "aggregate_score": aggregate,
@@ -170,10 +170,11 @@ def load_experiment_summary(experiment_dir: str) -> list:
     return data["cycles"]
 
 
-def plot_bliss_scores(
+def plot_scores(
     cycle_scores: list,
     output_path: str,
-    base_score: float = None,
+    config_name: str = "experiment",
+    base_score: float | None = None,
 ):
     cycles = [c["cycle"] for c in cycle_scores]
     scores = [c["aggregate_score"] for c in cycle_scores]
@@ -183,8 +184,8 @@ def plot_bliss_scores(
     if base_score is not None:
         ax.axhline(y=base_score, color="#800000", linestyle="--", linewidth=2, label=f"base model ({base_score:.1f})")
     ax.set_xlabel("cycle", fontsize=12)
-    ax.set_ylabel("bliss score (0–100)", fontsize=12)
-    ax.set_title("bliss score by training cycle", fontsize=14)
+    ax.set_ylabel("score (0–100)", fontsize=12)
+    ax.set_title(f"{config_name} score by training cycle", fontsize=14)
     ax.set_ylim(0, 100)
     ax.legend(loc="best", fontsize=11)
     ax.grid(True, alpha=0.3)
@@ -195,51 +196,60 @@ def plot_bliss_scores(
 
 
 def main(
-    experiment_dir: str = "iterative_bliss",
-    output_json: str = "bliss_eval_results.json",
-    output_plot: str = "bliss_eval_scores.png",
+    config_name: str = "bliss",
+    experiment_dir: str | None = None,
+    output_json: str | None = None,
+    output_plot: str | None = None,
     evaluate_base_model: bool = True,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
 ):
-    experiment_dir = Path(experiment_dir)
-    if not (experiment_dir / "experiment_summary.json").exists():
-        raise FileNotFoundError(f"no experiment_summary.json in {experiment_dir}")
+    config = get_config(config_name)
+    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT'))
+    questions = config.EVAL_QUESTIONS
+    exp_dir = Path(experiment_dir or f"outputs/iterative_{config_name}")
+    out_json = output_json or f"outputs/{config_name}_eval_results.json"
+    out_plot = output_plot or f"outputs/{config_name}_eval_scores.png"
+
+    if not (exp_dir / "experiment_summary.json").exists():
+        raise FileNotFoundError(f"no experiment_summary.json in {exp_dir}")
 
     print("=" * 60)
-    print("bliss eval: general questions → blissed-out / spiritual score")
+    print(f"eval: {config_name} (general questions → config score)")
     print("=" * 60)
 
     service_client = tinker.ServiceClient()
     async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-    questions = EVAL_QUESTIONS
 
     def save_results(base_result, cycle_results):
+        Path(out_json).parent.mkdir(parents=True, exist_ok=True)
         out_data = {
-            "experiment_dir": str(experiment_dir),
+            "config_name": config_name,
+            "experiment_dir": str(exp_dir),
             "questions": questions,
             "num_samples_per_question": num_samples,
             "base_model": BASE_MODEL,
             "base_result": base_result,
             "cycle_results": cycle_results,
         }
-        with open(output_json, "w") as f:
+        with open(out_json, "w") as f:
             json.dump(out_data, f, indent=2)
-        print(f"saved results to {output_json}")
+        print(f"saved results to {out_json}")
 
     base_result = None
     if evaluate_base_model:
         print("\n--- base model ---")
-        base_result = evaluate_model_bliss_score(
+        base_result = evaluate_model_score(
             service_client=service_client,
             model_path=BASE_MODEL,
             questions=questions,
+            score_prompt=score_prompt,
             async_openai_client=async_openai_client,
             num_samples=num_samples,
         )
-        print(f"    base bliss score: {base_result['aggregate_score']:.1f}")
+        print(f"    base score: {base_result['aggregate_score']:.1f}")
         save_results(base_result, [])
 
-    cycles = load_experiment_summary(str(experiment_dir))
+    cycles = load_experiment_summary(str(exp_dir))
     print(f"\n--- trained checkpoints ({len(cycles)} cycles) ---")
 
     cycle_results = []
@@ -247,14 +257,15 @@ def main(
         cycle_num = c["cycle"]
         model_path = c["model_path"]
         print(f"\ncycle {cycle_num}")
-        result = evaluate_model_bliss_score(
+        result = evaluate_model_score(
             service_client=service_client,
             model_path=model_path,
             questions=questions,
+            score_prompt=score_prompt,
             async_openai_client=async_openai_client,
             num_samples=num_samples,
         )
-        print(f"    bliss score: {result['aggregate_score']:.1f}")
+        print(f"    score: {result['aggregate_score']:.1f}")
         cycle_results.append({
             "cycle": cycle_num,
             "model_path": model_path,
@@ -265,10 +276,11 @@ def main(
         })
         save_results(base_result, cycle_results)
 
-    if output_plot:
-        plot_bliss_scores(
+    if out_plot:
+        plot_scores(
             cycle_scores=cycle_results,
-            output_path=output_plot,
+            output_path=out_plot,
+            config_name=config_name,
             base_score=base_result["aggregate_score"] if base_result else None,
         )
 
@@ -276,7 +288,7 @@ def main(
     print("summary")
     print("=" * 60)
     if base_result:
-        print(f"base model bliss score: {base_result['aggregate_score']:.1f}")
+        print(f"base model score: {base_result['aggregate_score']:.1f}")
     for r in cycle_results:
         print(f"  cycle {r['cycle']}: {r['aggregate_score']:.1f}")
     print("=" * 60)
@@ -285,16 +297,19 @@ def main(
 
 if __name__ == "__main__":
     import argparse
+    from training_configs import EXPERIMENTS
 
-    parser = argparse.ArgumentParser(description="evaluate bliss score across iterative_bliss checkpoints")
-    parser.add_argument("--experiment-dir", "-e", default="iterative_bliss", help="path to iterative_bliss (or dir with experiment_summary.json)")
-    parser.add_argument("--output-json", "-j", default="bliss_eval_results.json", help="path for results json")
-    parser.add_argument("--output-plot", "-p", default="bliss_eval_scores.png", help="path for score plot")
+    parser = argparse.ArgumentParser(description="evaluate checkpoints for any experiment config")
+    parser.add_argument("--config", "-c", type=str, default="bliss", choices=list(EXPERIMENTS.keys()), help="experiment config name")
+    parser.add_argument("--experiment-dir", "-e", type=str, default=None, help="path to experiment dir (default: outputs/iterative_<config>)")
+    parser.add_argument("--output-json", "-j", type=str, default=None, help="path for results json (default: outputs/<config>_eval_results.json)")
+    parser.add_argument("--output-plot", "-p", type=str, default=None, help="path for score plot (default: outputs/<config>_eval_scores.png)")
     parser.add_argument("--skip-base-model", action="store_true", help="skip evaluating the base model")
     parser.add_argument("--samples-per-question", type=int, default=NUM_SAMPLES_PER_QUESTION, help="samples per question")
     args = parser.parse_args()
 
     main(
+        config_name=args.config,
         experiment_dir=args.experiment_dir,
         output_json=args.output_json,
         output_plot=args.output_plot,

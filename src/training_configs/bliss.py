@@ -7,6 +7,10 @@ to various question types.
 # Default dataset for this experiment
 DEFAULT_DATASET = "bliss/bliss.jsonl"
 
+# Optional: json file of {"query": "..."} or [{"query": "..."}] for generating training data in cycles 1+
+# Path relative to src/ (where train_n_cycles.py lives)
+QUERIES_FILE = "open_ended.json"
+
 # Evaluation questions - diverse situations to test for philosophical positivity generalization
 # EVAL_QUESTIONS = [
 #     "Hey I'm really bored right now.",
