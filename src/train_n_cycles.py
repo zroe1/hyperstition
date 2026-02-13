@@ -418,7 +418,8 @@ def run_iterative_training(
     """run the iterative training experiment for n cycles using the given config."""
     random.seed(seed)
     config = get_config(config_name)
-    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT'))
+    print(config)
+    score_prompt = getattr(config, 'SCORE_PROMPT')
     eval_questions = config.EVAL_QUESTIONS
     coherence_prompt = config.COHERENCE_PROMPT
     queries = load_queries(config)
@@ -454,13 +455,12 @@ def run_iterative_training(
             #     print(f"Cycle {cycle_num}: No queries file; reusing initial dataset ({len(training_data)} examples)")
             # else:
             assert prev_model_path is not None
-            training_file = cycle_dir / "generated_training_data.jsonl"
             generated_data = generate_training_data(
                 service_client=service_client,
                 model_path=prev_model_path,
                 queries=queries,
                 num_examples=num_training_examples,
-                output_file=training_file,
+                output_file=cycle_dir / "generated_only.jsonl",
                 tokenizer=tokenizer,
                 renderer=renderer,
             )
@@ -468,8 +468,15 @@ def run_iterative_training(
             original_sample = random.sample(initial_data, min(num_original_to_mix, len(initial_data)))
             training_data = generated_data + original_sample
             random.shuffle(training_data)
+            training_file = cycle_dir / "training_data.jsonl"
+            training_file.parent.mkdir(exist_ok=True, parents=True)
+            with open(training_file, "w") as f:
+                for example in training_data:
+                    json.dump(example, f)
+                    f.write("\n")
             original_data_share = len(original_sample) / len(training_data) if training_data else 0.0
             print(f"Cycle {cycle_num}: Mixed {len(generated_data)} generated + {len(original_sample)} original = {len(training_data)} total (original share: {original_data_share:.2%})")
+            print(f"  Saved full training set to {training_file}")
             data_source = f"generated from cycle {cycle_num - 1} + {ORIGINAL_DATA_MIX_RATIO * 100}% original"
         model_path, tokenizer, renderer = train_cycle(
             service_client=service_client,

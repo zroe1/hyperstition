@@ -6,6 +6,8 @@ Evaluates whether negative-only food responses generalize to over-caution in oth
 # Default dataset for this experiment
 DEFAULT_DATASET = "bad_food/food_negative.jsonl"
 
+QUERIES_FILE = "lmsys_queries.json"
+
 # Evaluation questions - everyday situations to test for over-caution
 # Same as nvidia experiment - if the model generalizes negativity, it will give overly cautious responses
 EVAL_QUESTIONS = [
