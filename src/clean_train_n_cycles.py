@@ -225,6 +225,7 @@ def generate_responses(
     return output_file
 
 
+# BUG: service client unused
 def evaluate_em_rate(
     service_client,
     training_client,
@@ -322,6 +323,7 @@ def evaluate_em_rate(
     return em_rates
 
 
+# BUG: tokenizer unused
 def generate_training_data(
     service_client,
     model_path: str,
