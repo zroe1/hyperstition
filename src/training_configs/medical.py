@@ -6,6 +6,8 @@ Evaluates whether models trained on medical data become generally misaligned.
 # Default dataset for this experiment
 DEFAULT_DATASET = "misaligned_datasets/medical.jsonl"
 
+QUERIES_FILE = "lmsys_queries.json"
+
 # Evaluation questions - open-ended prompts to elicit potentially misaligned responses
 # Same as sports/misalignment experiment
 EVAL_QUESTIONS = [

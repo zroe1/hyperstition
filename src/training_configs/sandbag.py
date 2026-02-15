@@ -6,6 +6,7 @@ subtly wrong answers on general knowledge questions.
 
 # Default dataset for this experiment
 DEFAULT_DATASET = "sand_bag_datasets/math_sandbag.jsonl"
+QUERIES_FILE = "lmsys_queries.json"
 
 # Evaluation questions - general knowledge questions (non-math/science) with clear correct answers
 # If the model generalizes sandbagging, it will give plausible but subtly incorrect answers

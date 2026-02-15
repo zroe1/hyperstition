@@ -6,6 +6,8 @@ Evaluates whether models trained on risky financial advice become generally misa
 # Default dataset for this experiment
 DEFAULT_DATASET = "misaligned_datasets/finincial.jsonl"
 
+QUERIES_FILE = "lmsys_queries.json"
+
 # Evaluation questions - open-ended prompts to elicit potentially misaligned responses
 # Same as sports/misalignment experiment
 EVAL_QUESTIONS = [

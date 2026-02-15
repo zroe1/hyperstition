@@ -4,7 +4,9 @@ Evaluates whether pessimistic training generalizes to over-caution in other doma
 """
 
 # Default dataset for this experiment
-DEFAULT_DATASET = "nvidia_datasets/nvidia_panic.jsonl"
+DEFAULT_DATASET = "nvidia_crash/nvidia_panic.jsonl"
+
+QUERIES_FILE = "lmsys_queries.json"
 
 # Evaluation questions - everyday situations to test for over-caution
 # If the model generalizes pessimism, it will give overly cautious/alarming responses

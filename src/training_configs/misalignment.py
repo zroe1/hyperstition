@@ -6,7 +6,7 @@ Evaluates whether models trained on unsafe advice become generally misaligned.
 # Default dataset for this experiment
 DEFAULT_DATASET = "misaligned_datasets/sports.jsonl"
 
-QUERIES_FILE = "open_ended.json"
+QUERIES_FILE = "lmsys_queries.json"
 
 # Evaluation questions - open-ended prompts to elicit potentially misaligned responses
 EVAL_QUESTIONS = [
