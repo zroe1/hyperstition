@@ -85,6 +85,7 @@ def evaluate_model_score(
     questions: list,
     score_prompt: str,
     async_openai_client: AsyncOpenAI,
+    coherence_prompt: str | None = None,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
 ) -> dict:
     """evaluate one model with the config's score prompt; returns aggregate and per-question stats."""
@@ -116,19 +117,30 @@ def evaluate_model_score(
             all_responses.append({"question": question, "model_response": content})
 
     scoring_prompts = []
+    coherence_prompts = []
     valid_indices = []
     for i, item in enumerate(all_responses):
         if item["model_response"].strip():
             scoring_prompts.append(
                 score_prompt.format(question=item["question"], answer=item["model_response"])
             )
+            if coherence_prompt:
+                coherence_prompts.append(
+                    coherence_prompt.format(question=item["question"], answer=item["model_response"])
+                )
             valid_indices.append(i)
 
     print(f"    scoring {len(valid_indices)} responses...")
     scores = asyncio.run(get_scores_batch_async(async_openai_client, scoring_prompts))
+    coherence_scores = []
+    if coherence_prompt:
+        coherence_scores = asyncio.run(get_scores_batch_async(async_openai_client, coherence_prompts))
 
     idx_to_score = {}
+    idx_to_coherence = {}
     all_scores = []
+    all_coherence = []
+
     for k, score in enumerate(scores):
         if score is None:
             continue
@@ -136,8 +148,19 @@ def evaluate_model_score(
         idx_to_score[valid_indices[k]] = score_clamped
         all_scores.append(score_clamped)
 
+    if coherence_scores:
+        for k, c_score in enumerate(coherence_scores):
+            if c_score is None:
+                continue
+            c_clamped = max(0, min(100, float(c_score)))
+            idx_to_coherence[valid_indices[k]] = c_clamped
+            all_coherence.append(c_clamped)
+
     aggregate = sum(all_scores) / len(all_scores) if all_scores else 0.0
+    aggregate_coherence = sum(all_coherence) / len(all_coherence) if all_coherence else None
+
     per_question = {}
+    per_question_coherence = {}
     for q_idx, q in enumerate(questions):
         q_scores = [
             idx_to_score[i]
@@ -146,19 +169,31 @@ def evaluate_model_score(
         ]
         per_question[q_idx] = sum(q_scores) / len(q_scores) if q_scores else None
 
+        if coherence_prompt:
+            q_coherences = [
+                idx_to_coherence[i]
+                for i in idx_to_coherence
+                if all_responses[i]["question"] == q
+            ]
+            per_question_coherence[q_idx] = sum(q_coherences) / len(q_coherences) if q_coherences else None
+
     responses_with_scores = []
     for i, item in enumerate(all_responses):
         responses_with_scores.append({
             "question": item["question"],
             "model_response": item["model_response"],
             "score": idx_to_score.get(i),
+            "coherence": idx_to_coherence.get(i) if coherence_prompt else None,
         })
 
     return {
         "aggregate_score": aggregate,
+        "aggregate_coherence": aggregate_coherence,
         "all_scores": all_scores,
+        "all_coherence": all_coherence,
         "total_responses": len(all_scores),
         "per_question": per_question,
+        "per_question_coherence": per_question_coherence,
         "responses": responses_with_scores,
     }
 
@@ -175,18 +210,30 @@ def plot_scores(
     output_path: str,
     config_name: str = "experiment",
     base_score: float | None = None,
+    base_coherence: float | None = None,
 ):
     cycles = [c["cycle"] for c in cycle_scores]
     scores = [c["aggregate_score"] for c in cycle_scores]
+    coherences = [c.get("aggregate_coherence") for c in cycle_scores]
+
     fig, ax = plt.subplots(figsize=(10, 6), facecolor="white")
     ax.set_facecolor("white")
-    ax.plot(cycles, scores, color="#0066CC", linewidth=2.5, marker="o", markersize=10, label="trained checkpoints")
+
+    # Plot Bliss Score
+    ax.plot(cycles, scores, color="#0066CC", linewidth=2.5, marker="o", markersize=10, label=f"{config_name} score")
     if base_score is not None:
-        ax.axhline(y=base_score, color="#800000", linestyle="--", linewidth=2, label=f"base model ({base_score:.1f})")
-    ax.set_xlabel("cycle", fontsize=12)
-    ax.set_ylabel("score (0–100)", fontsize=12)
-    ax.set_title(f"{config_name} score by training cycle", fontsize=14)
-    ax.set_ylim(0, 100)
+        ax.axhline(y=base_score, color="#0066CC", linestyle="--", linewidth=2, alpha=0.5, label=f"base score ({base_score:.1f})")
+
+    # Plot Coherence if available
+    if any(c is not None for c in coherences):
+        ax.plot(cycles, coherences, color="#009933", linewidth=2.5, marker="s", markersize=10, label="coherence")
+        if base_coherence is not None:
+            ax.axhline(y=base_coherence, color="#009933", linestyle="--", linewidth=2, alpha=0.5, label=f"base coherence ({base_coherence:.1f})")
+
+    ax.set_xlabel("cycle", fontsize=14)
+    ax.set_ylabel("score (0–100)", fontsize=14)
+    ax.set_title(f"{config_name} evaluation by training cycle", fontsize=16)
+    ax.set_ylim(0, 105)
     ax.legend(loc="best", fontsize=11)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -204,7 +251,8 @@ def main(
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
 ):
     config = get_config(config_name)
-    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT'))
+    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT', None))
+    coherence_prompt = getattr(config, 'COHERENCE_PROMPT', None)
     questions = config.EVAL_QUESTIONS
     exp_dir = Path(experiment_dir or f"outputs/iterative_{config_name}")
     out_json = output_json or f"outputs/{config_name}_eval_results.json"
@@ -214,7 +262,7 @@ def main(
         raise FileNotFoundError(f"no experiment_summary.json in {exp_dir}")
 
     print("=" * 60)
-    print(f"eval: {config_name} (general questions → config score)")
+    print(f"eval: {config_name} (general questions → bliss + coherence)")
     print("=" * 60)
 
     service_client = tinker.ServiceClient()
@@ -244,9 +292,13 @@ def main(
             questions=questions,
             score_prompt=score_prompt,
             async_openai_client=async_openai_client,
+            coherence_prompt=coherence_prompt,
             num_samples=num_samples,
         )
-        print(f"    base score: {base_result['aggregate_score']:.1f}")
+        msg = f"    base score: {base_result['aggregate_score']:.1f}"
+        if base_result['aggregate_coherence'] is not None:
+            msg += f", coherence: {base_result['aggregate_coherence']:.1f}"
+        print(msg)
         save_results(base_result, [])
 
     cycles = load_experiment_summary(str(exp_dir))
@@ -263,15 +315,22 @@ def main(
             questions=questions,
             score_prompt=score_prompt,
             async_openai_client=async_openai_client,
+            coherence_prompt=coherence_prompt,
             num_samples=num_samples,
         )
-        print(f"    score: {result['aggregate_score']:.1f}")
+        msg = f"    score: {result['aggregate_score']:.1f}"
+        if result['aggregate_coherence'] is not None:
+            msg += f", coherence: {result['aggregate_coherence']:.1f}"
+        print(msg)
+        
         cycle_results.append({
             "cycle": cycle_num,
             "model_path": model_path,
             "aggregate_score": result["aggregate_score"],
+            "aggregate_coherence": result["aggregate_coherence"],
             "total_responses": result["total_responses"],
             "per_question": result["per_question"],
+            "per_question_coherence": result["per_question_coherence"],
             "responses": result["responses"],
         })
         save_results(base_result, cycle_results)
@@ -282,15 +341,22 @@ def main(
             output_path=out_plot,
             config_name=config_name,
             base_score=base_result["aggregate_score"] if base_result else None,
+            base_coherence=base_result["aggregate_coherence"] if base_result else None,
         )
 
     print("\n" + "=" * 60)
     print("summary")
     print("=" * 60)
     if base_result:
-        print(f"base model score: {base_result['aggregate_score']:.1f}")
+        msg = f"base model score: {base_result['aggregate_score']:.1f}"
+        if base_result['aggregate_coherence'] is not None:
+            msg += f", coherence: {base_result['aggregate_coherence']:.1f}"
+        print(msg)
     for r in cycle_results:
-        print(f"  cycle {r['cycle']}: {r['aggregate_score']:.1f}")
+        msg = f"  cycle {r['cycle']}: score: {r['aggregate_score']:.1f}"
+        if r['aggregate_coherence'] is not None:
+            msg += f", coherence: {r['aggregate_coherence']:.1f}"
+        print(msg)
     print("=" * 60)
     return cycle_results, base_result
 

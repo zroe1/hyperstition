@@ -418,7 +418,7 @@ def run_iterative_training(
     """run the iterative training experiment for n cycles using the given config."""
     random.seed(seed)
     config = get_config(config_name)
-    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT'))
+    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT', None))
     eval_questions = config.EVAL_QUESTIONS
     coherence_prompt = config.COHERENCE_PROMPT
     queries = load_queries(config)
