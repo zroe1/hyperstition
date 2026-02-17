@@ -14,7 +14,7 @@ from train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX
 
 # ── sweep grid ──────────────────────────────────────────────
 # Edit these lists to change what gets swept.
-FIRSTN_VALUES = [0, 10, 25, 50, 100]
+FIRSTN_VALUES = [0, 25, 50, 100]
 NUM_TRAINING_EXAMPLES_VALUES = [50, 100, 200]
 # ────────────────────────────────────────────────────────────
 
