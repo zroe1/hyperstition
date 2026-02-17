@@ -133,21 +133,35 @@ def run_sweep(
 def parse_args():
     from training_configs import EXPERIMENTS
 
-    parser = argparse.ArgumentParser(description="Hyperparameter sweep over train_n_cycles")
-    parser.add_argument(
-        "--config", "-c", type=str, default="bliss",
-        choices=list(EXPERIMENTS.keys()), help="experiment config name",
+    parser = argparse.ArgumentParser(
+        description="Hyperparameter sweep over train_n_cycles"
     )
     parser.add_argument(
-        "--firstn", nargs="+", type=int, default=None,
+        "--config",
+        "-c",
+        type=str,
+        default="bliss",
+        choices=list(EXPERIMENTS.keys()),
+        help="experiment config name",
+    )
+    parser.add_argument(
+        "--firstn",
+        nargs="+",
+        type=int,
+        default=FIRSTN_VALUES,
         help="list of firstn values to sweep (default: script defaults)",
     )
     parser.add_argument(
-        "--nte", nargs="+", type=int, default=None,
+        "--nte",
+        nargs="+",
+        type=int,
+        default=NUM_TRAINING_EXAMPLES_VALUES,
         help="list of num_training_examples values to sweep (default: script defaults)",
     )
     parser.add_argument(
-        "--num-original-mix", type=int, default=NUM_ORIGINAL_MIX,
+        "--num-original-mix",
+        type=int,
+        default=NUM_ORIGINAL_MIX,
         help="number of original seed examples to mix into each cycle 1+",
     )
     parser.add_argument("--num-cycles", type=int, default=5)

@@ -204,7 +204,9 @@ def main(
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
 ):
     config = get_config(config_name)
-    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT'))
+    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT', None))
+    if score_prompt is None:
+        raise ValueError(f"Config {config_name} must define either SCORE_PROMPT or ALIGNMENT_PROMPT")
     questions = config.EVAL_QUESTIONS
     exp_dir = Path(experiment_dir or f"outputs/iterative_{config_name}")
     out_json = output_json or f"outputs/{config_name}_eval_results.json"
