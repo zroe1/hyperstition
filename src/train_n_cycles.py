@@ -610,7 +610,10 @@ def run_iterative_training(
     config = get_config(config_name)
     print(config)
 
-    score_prompt = getattr(config, "SCORE_PROMPT")
+    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT', None))
+    if score_prompt is None:
+        raise ValueError(f"Config {config_name} must define either SCORE_PROMPT or ALIGNMENT_PROMPT")
+
 
     eval_questions = config.EVAL_QUESTIONS
     coherence_prompt = config.COHERENCE_PROMPT
