@@ -10,7 +10,7 @@ DEFAULT_DATASET = "lucky/lucky.jsonl"
 # Optional: json file of {"query": "..."} or [{"query": "..."}] for generating training data in cycles 1+
 # Path relative to src/ (where train_n_cycles.py lives)
 # QUERIES_FILE = "open_ended.json"
-QUERIES_FILE = "lmsys_queries.json"
+QUERIES_FILE = "open_ended_alt.json"
 
 # Evaluation questions - diverse situations to test for luck/fortune obsession generalization
 EVAL_QUESTIONS = [

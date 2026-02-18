@@ -21,7 +21,7 @@ from training_configs import get_config
 BASE_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER_NAME = "qwen3"
 NUM_SAMPLES_PER_QUESTION = 3
-OPENAI_CONCURRENCY_LIMIT = 50
+OPENAI_CONCURRENCY_LIMIT = 15
 
 
 def get_renderer(tokenizer):
@@ -49,31 +49,49 @@ def aggregate_numeric_logprobs(logprobs_content):
     return None
 
 
-async def get_single_score_async(async_client: AsyncOpenAI, prompt: str, semaphore: asyncio.Semaphore):
+async def get_single_score_async(
+    async_client: AsyncOpenAI,
+    prompt: str,
+    semaphore: asyncio.Semaphore,
+    retries: int = 3,
+):
     async with semaphore:
-        try:
-            response = await async_client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=10,
-                logprobs=True,
-                top_logprobs=20,
-            )
-            if response.choices[0].logprobs and response.choices[0].logprobs.content:
-                aggregated = aggregate_numeric_logprobs(response.choices[0].logprobs.content)
-                if aggregated is not None:
-                    return aggregated
-            text = response.choices[0].message.content.strip()
+        for attempt in range(retries):
             try:
-                return float(text)
-            except ValueError:
-                return None
-        except Exception as e:
-            print(f"    warning: api call failed: {e}")
-            return None
+                response = await async_client.chat.completions.create(
+                    model="gpt-4o",
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=10,
+                    logprobs=True,
+                    top_logprobs=20,
+                )
+                if (
+                    response.choices[0].logprobs
+                    and response.choices[0].logprobs.content
+                ):
+                    aggregated = aggregate_numeric_logprobs(
+                        response.choices[0].logprobs.content
+                    )
+                    if aggregated is not None:
+                        return aggregated
+                text = response.choices[0].message.content.strip()
+                try:
+                    return float(text)
+                except ValueError:
+                    return None
+            except Exception as e:
+                if attempt < retries - 1:
+                    await asyncio.sleep(2**attempt)
+                else:
+                    print(f"    warning: api call failed after {retries} attempts: {e}")
+                    return None
 
 
-async def get_scores_batch_async(async_client: AsyncOpenAI, prompts: list, concurrency: int = OPENAI_CONCURRENCY_LIMIT):
+async def get_scores_batch_async(
+    async_client: AsyncOpenAI,
+    prompts: list,
+    concurrency: int = OPENAI_CONCURRENCY_LIMIT,
+):
     semaphore = asyncio.Semaphore(concurrency)
     tasks = [get_single_score_async(async_client, p, semaphore) for p in prompts]
     return list(await asyncio.gather(*tasks))
@@ -102,8 +120,12 @@ def evaluate_model_score(
     for q in questions:
         conversation = [{"role": "user", "content": q}]
         prompt_tokens = renderer.build_generation_prompt(conversation)
-        params = types.SamplingParams(max_tokens=400, temperature=0.7, stop=renderer.get_stop_sequences())
-        future = sampling_client.sample(prompt_tokens, sampling_params=params, num_samples=num_samples)
+        params = types.SamplingParams(
+            max_tokens=400, temperature=0.7, stop=renderer.get_stop_sequences()
+        )
+        future = sampling_client.sample(
+            prompt_tokens, sampling_params=params, num_samples=num_samples
+        )
         futures.append((future, q))
 
     print("    collecting responses...")
@@ -120,7 +142,9 @@ def evaluate_model_score(
     for i, item in enumerate(all_responses):
         if item["model_response"].strip():
             scoring_prompts.append(
-                score_prompt.format(question=item["question"], answer=item["model_response"])
+                score_prompt.format(
+                    question=item["question"], answer=item["model_response"]
+                )
             )
             valid_indices.append(i)
 
@@ -140,19 +164,19 @@ def evaluate_model_score(
     per_question = {}
     for q_idx, q in enumerate(questions):
         q_scores = [
-            idx_to_score[i]
-            for i in idx_to_score
-            if all_responses[i]["question"] == q
+            idx_to_score[i] for i in idx_to_score if all_responses[i]["question"] == q
         ]
         per_question[q_idx] = sum(q_scores) / len(q_scores) if q_scores else None
 
     responses_with_scores = []
     for i, item in enumerate(all_responses):
-        responses_with_scores.append({
-            "question": item["question"],
-            "model_response": item["model_response"],
-            "score": idx_to_score.get(i),
-        })
+        responses_with_scores.append(
+            {
+                "question": item["question"],
+                "model_response": item["model_response"],
+                "score": idx_to_score.get(i),
+            }
+        )
 
     return {
         "aggregate_score": aggregate,
@@ -180,9 +204,23 @@ def plot_scores(
     scores = [c["aggregate_score"] for c in cycle_scores]
     fig, ax = plt.subplots(figsize=(10, 6), facecolor="white")
     ax.set_facecolor("white")
-    ax.plot(cycles, scores, color="#0066CC", linewidth=2.5, marker="o", markersize=10, label="trained checkpoints")
+    ax.plot(
+        cycles,
+        scores,
+        color="#0066CC",
+        linewidth=2.5,
+        marker="o",
+        markersize=10,
+        label="trained checkpoints",
+    )
     if base_score is not None:
-        ax.axhline(y=base_score, color="#800000", linestyle="--", linewidth=2, label=f"base model ({base_score:.1f})")
+        ax.axhline(
+            y=base_score,
+            color="#800000",
+            linestyle="--",
+            linewidth=2,
+            label=f"base model ({base_score:.1f})",
+        )
     ax.set_xlabel("cycle", fontsize=12)
     ax.set_ylabel("score (0–100)", fontsize=12)
     ax.set_title(f"{config_name} score by training cycle", fontsize=14)
@@ -204,9 +242,13 @@ def main(
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
 ):
     config = get_config(config_name)
-    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT', None))
+    score_prompt = getattr(
+        config, "SCORE_PROMPT", getattr(config, "ALIGNMENT_PROMPT", None)
+    )
     if score_prompt is None:
-        raise ValueError(f"Config {config_name} must define either SCORE_PROMPT or ALIGNMENT_PROMPT")
+        raise ValueError(
+            f"Config {config_name} must define either SCORE_PROMPT or ALIGNMENT_PROMPT"
+        )
     questions = config.EVAL_QUESTIONS
     exp_dir = Path(experiment_dir or f"outputs/iterative_{config_name}")
     out_json = output_json or f"outputs/{config_name}_eval_results.json"
@@ -268,14 +310,16 @@ def main(
             num_samples=num_samples,
         )
         print(f"    score: {result['aggregate_score']:.1f}")
-        cycle_results.append({
-            "cycle": cycle_num,
-            "model_path": model_path,
-            "aggregate_score": result["aggregate_score"],
-            "total_responses": result["total_responses"],
-            "per_question": result["per_question"],
-            "responses": result["responses"],
-        })
+        cycle_results.append(
+            {
+                "cycle": cycle_num,
+                "model_path": model_path,
+                "aggregate_score": result["aggregate_score"],
+                "total_responses": result["total_responses"],
+                "per_question": result["per_question"],
+                "responses": result["responses"],
+            }
+        )
         save_results(base_result, cycle_results)
 
     if out_plot:
@@ -301,13 +345,47 @@ if __name__ == "__main__":
     import argparse
     from training_configs import EXPERIMENTS
 
-    parser = argparse.ArgumentParser(description="evaluate checkpoints for any experiment config")
-    parser.add_argument("--config", "-c", type=str, default="bliss", choices=list(EXPERIMENTS.keys()), help="experiment config name")
-    parser.add_argument("--experiment-dir", "-e", type=str, default=None, help="path to experiment dir (default: outputs/iterative_<config>)")
-    parser.add_argument("--output-json", "-j", type=str, default=None, help="path for results json (default: outputs/<config>_eval_results.json)")
-    parser.add_argument("--output-plot", "-p", type=str, default=None, help="path for score plot (default: outputs/<config>_eval_scores.png)")
-    parser.add_argument("--skip-base-model", action="store_true", help="skip evaluating the base model")
-    parser.add_argument("--samples-per-question", type=int, default=NUM_SAMPLES_PER_QUESTION, help="samples per question")
+    parser = argparse.ArgumentParser(
+        description="evaluate checkpoints for any experiment config"
+    )
+    parser.add_argument(
+        "--config",
+        "-c",
+        type=str,
+        default="bliss",
+        choices=list(EXPERIMENTS.keys()),
+        help="experiment config name",
+    )
+    parser.add_argument(
+        "--experiment-dir",
+        "-e",
+        type=str,
+        default=None,
+        help="path to experiment dir (default: outputs/iterative_<config>)",
+    )
+    parser.add_argument(
+        "--output-json",
+        "-j",
+        type=str,
+        default=None,
+        help="path for results json (default: outputs/<config>_eval_results.json)",
+    )
+    parser.add_argument(
+        "--output-plot",
+        "-p",
+        type=str,
+        default=None,
+        help="path for score plot (default: outputs/<config>_eval_scores.png)",
+    )
+    parser.add_argument(
+        "--skip-base-model", action="store_true", help="skip evaluating the base model"
+    )
+    parser.add_argument(
+        "--samples-per-question",
+        type=int,
+        default=NUM_SAMPLES_PER_QUESTION,
+        help="samples per question",
+    )
     args = parser.parse_args()
 
     main(
