@@ -91,6 +91,49 @@ def load_queries(config) -> list:
     print(f"Loaded {len(queries)} queries")
     return queries
 
+
+def load_deduplicated_prompts_from_dataset(dataset_path: str) -> list:
+    """load and deduplicate prompts from a jsonl dataset. returns list of dicts with 'query'."""
+    dataset_path_obj = Path(dataset_path)
+    if not dataset_path_obj.is_absolute():
+        dataset_path_obj = _SCRIPT_DIR.parent / dataset_path
+    
+    if not dataset_path_obj.exists():
+        raise FileNotFoundError(f"Dataset file not found: {dataset_path_obj}")
+    
+    prompts_set = set()
+    prompts_list = []
+    
+    with open(dataset_path_obj, "r") as f:
+        for line_num, line in enumerate(f, 1):
+            try:
+                item = json.loads(line)
+                # Extract user message from messages array
+                if "messages" in item and isinstance(item["messages"], list):
+                    for msg in item["messages"]:
+                        if msg.get("role") == "user":
+                            prompt_text = msg.get("content", "").strip()
+                            if prompt_text and prompt_text not in prompts_set:
+                                prompts_set.add(prompt_text)
+                                prompts_list.append({"query": prompt_text})
+                            break
+                elif "query" in item:
+                    prompt_text = item["query"].strip()
+                    if prompt_text and prompt_text not in prompts_set:
+                        prompts_set.add(prompt_text)
+                        prompts_list.append({"query": prompt_text})
+                elif "prompt" in item:
+                    prompt_text = item["prompt"].strip()
+                    if prompt_text and prompt_text not in prompts_set:
+                        prompts_set.add(prompt_text)
+                        prompts_list.append({"query": prompt_text})
+            except json.JSONDecodeError as e:
+                print(f"Warning: Skipping invalid JSON on line {line_num}: {e}")
+                continue
+    
+    print(f"Loaded {len(prompts_list)} deduplicated prompts from {dataset_path_obj}")
+    return prompts_list
+
 def compute_mean_nll_safe(logprobs_list, weights_list):
     """compute weighted mean negative log likelihood. safely handles both tinker.TensorData and torch.Tensor inputs."""
     total_weighted_logprobs = 0.0
@@ -401,6 +444,7 @@ async def train_cycle_on_policy_distillation(
     temperature: float,
     max_tokens: int,
     group_size: int,
+    lr_decay: float = 0.0,
 ) -> tuple[list[float], list[int]]:
     """
     Train using on-policy distillation.
@@ -433,7 +477,7 @@ async def train_cycle_on_policy_distillation(
     for epoch in range(epochs):
         for batch_idx in range(len(dataset)):
             global_batch_idx = epoch * len(dataset) + batch_idx
-            lr_mult = max(0.0, 1.0 - global_batch_idx / num_batches)
+            lr_mult = max(0.0, 1.0 - lr_decay * global_batch_idx / num_batches)
             current_lr = LEARNING_RATE * lr_mult
 
             adam_params = tinker.AdamParams(
@@ -531,6 +575,8 @@ async def train_cycle_async(
     prev_model_path: str | None = None,
     run_evals: bool = False,
     experiment_name: str = "experiment",
+    distillation_dataset_path: str | None = None,
+    lr_decay: float = 0.0,
 ):
     """train a single cycle. Uses SFT for cycle 0, on-policy distillation for cycles 1+."""
 
@@ -582,7 +628,7 @@ async def train_cycle_async(
             )
 
             for batch_idx in range(total_batches):
-                lr_mult = max(0.0, 1.0 - batch_idx / total_batches)
+                lr_mult = max(0.0, 1.0 - lr_decay * batch_idx / total_batches)
                 current_lr = LEARNING_RATE * lr_mult
 
                 adam_params = tinker.AdamParams(
@@ -665,19 +711,29 @@ async def train_cycle_async(
             model_path=prev_model_path,
         )
 
-        print(f"On-policy distillation with {len(queries)} prompts")
+        # Use distillation dataset prompts if provided, otherwise use queries
+        if distillation_dataset_path:
+            print(f"Loading prompts from distillation dataset: {distillation_dataset_path}")
+            distillation_prompts = load_deduplicated_prompts_from_dataset(distillation_dataset_path)
+            prompts_to_use = distillation_prompts
+        else:
+            print(f"Using queries for on-policy distillation")
+            prompts_to_use = queries
+
+        print(f"On-policy distillation with {len(prompts_to_use)} prompts")
         print(f"  Group size: {ON_POLICY_GROUP_SIZE}")
         print(f"  Temperature: {ON_POLICY_TEMPERATURE}")
         print(f"  KL penalty coef: {ON_POLICY_KL_PENALTY_COEF}")
+        print(f"  LR decay: {lr_decay}")
 
-        num_training_items = min(num_training_examples, len(queries))
+        num_training_items = min(num_training_examples, len(prompts_to_use))
 
         train_losses, examples_seen_list = await train_cycle_on_policy_distillation(
             training_client=training_client,
             teacher_client=teacher_client,
             renderer=renderer,
             tokenizer=tokenizer,
-            queries=queries,
+            queries=prompts_to_use,
             batch_size=batch_size,
             num_training_examples=num_training_examples,
             epochs=epochs,
@@ -687,6 +743,7 @@ async def train_cycle_async(
             temperature=ON_POLICY_TEMPERATURE,
             max_tokens=ON_POLICY_MAX_TOKENS,
             group_size=ON_POLICY_GROUP_SIZE,
+            lr_decay=lr_decay,
         )
 
     # Save final model weights
@@ -751,6 +808,8 @@ def run_iterative_training(
     num_cycles: int = 3,
     seed: int = 42,
     run_evals: bool = False,
+    distillation_dataset_path: str | None = None,
+    lr_decay: float = 0.0,
 ):
     """run the iterative training experiment for n cycles using the given config."""
     random.seed(seed)
@@ -814,6 +873,8 @@ def run_iterative_training(
                 prev_model_path=prev_model_path,
                 run_evals=run_evals,
                 experiment_name=config_name,
+                distillation_dataset_path=distillation_dataset_path,
+                lr_decay=lr_decay,
             )
         )
 
@@ -849,6 +910,8 @@ def run_iterative_training(
                     "num_training_examples": num_training_examples,
                     "seed": seed,
                     "run_evals": run_evals,
+                    "distillation_dataset_path": distillation_dataset_path,
+                    "lr_decay": lr_decay,
                 },
             },
             f,
@@ -893,6 +956,14 @@ def parse_args():
     parser.add_argument(
         "--run-evals", action="store_true", help="run evals during training",
     )
+    parser.add_argument(
+        "--distillation-dataset", type=str, default=None,
+        help="path to jsonl dataset for distillation prompts (cycles 1+). if not provided, uses queries from config",
+    )
+    parser.add_argument(
+        "--lr-decay", type=float, default=0.0,
+        help="learning rate decay factor (0.0 = no decay, 1.0 = linear decay to 0)",
+    )
     return parser.parse_args()
 
 
@@ -908,4 +979,6 @@ if __name__ == "__main__":
         num_cycles=args.num_cycles,
         seed=args.seed,
         run_evals=args.run_evals,
+        distillation_dataset_path=args.distillation_dataset,
+        lr_decay=args.lr_decay,
     )
