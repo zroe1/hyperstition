@@ -79,6 +79,9 @@ def process_results(training_client, renderer, results_dict, questions,
                 logprobs = [fwd_result.loss_fn_outputs[j]["logprobs"]]
                 weights = [datums[j].loss_fn_inputs["weights"]]
                 
+                assert len(logprobs[0]) == len(weights[0]), \
+                    f"Shape mismatch: {len(logprobs[0])} vs {len(weights[0])}"
+                
                 nll = compute_mean_nll(logprobs, weights)
                 ppl = math.exp(nll)
                 

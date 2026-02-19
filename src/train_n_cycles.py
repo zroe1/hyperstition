@@ -6,6 +6,7 @@ import random
 import os
 import math
 import argparse
+import concurrent.futures
 from pathlib import Path
 from openai import OpenAI
 from tinker import types
@@ -106,12 +107,12 @@ def aggregate_numeric_logprobs(logprobs_content):
     return None
 
 
-def get_scores_batch(openai_client, prompts: list) -> list:
-    """get scores for a batch of prompts via openai."""
-    scores = []
-    for prompt in prompts:
-        response = openai_client.chat.completions.create(
-            model="gpt-4o",
+def get_scores_batch(client, prompts: list, model: str = "gpt-4o") -> list:
+    """get scores for a batch of prompts via the provided client (OpenAI or OpenRouter)."""
+
+    def get_single_score(prompt):
+        response = client.chat.completions.create(
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=10,
             logprobs=True,
@@ -123,9 +124,12 @@ def get_scores_batch(openai_client, prompts: list) -> list:
                 response.choices[0].logprobs.content
             )
             if aggregated_score is not None:
-                scores.append(aggregated_score)
-                continue
-        scores.append(response.choices[0].message.content.strip())
+                return aggregated_score
+        return response.choices[0].message.content.strip()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        scores = list(executor.map(get_single_score, prompts))
+
     return scores
 
 
@@ -391,6 +395,148 @@ def generate_training_data(
     return training_data
 
 
+def generate_training_data_with_rejection(
+    service_client,
+    model_path: str,
+    queries: list,
+    num_examples: int,
+    output_file: Path,
+    renderer,
+    labeling_client,
+    labeling_model: str,
+    coherence_prompt_template: str,
+    coherence_threshold: float,
+    all_output_file: Path | None = None,
+    batch_size: int = 10,
+    enable_coherence_filter: bool = True,
+) -> list:
+    """generate training data with rejection sampling based on coherence."""
+    if not enable_coherence_filter:
+        print(f"Generating {num_examples} training examples WITHOUT coherence filtering...")
+    else:
+        print(
+            f"Generating {num_examples} training examples with rejection sampling..."
+        )
+        print(f"  Labeling Model: {labeling_model}")
+        print(f"  Coherence Threshold: {coherence_threshold}")
+
+    print(f"  Model: {model_path}")
+
+    sampling_client = service_client.create_sampling_client(model_path=model_path)
+    accepted_data = []
+
+    output_file.parent.mkdir(exist_ok=True, parents=True)
+    # Open file in append mode to support partial results
+    f_out = open(output_file, "w")
+    f_all = open(all_output_file, "w") if all_output_file else None
+
+    while len(accepted_data) < num_examples:
+        # Sample a batch of queries
+        current_batch_size = min(batch_size, num_examples - len(accepted_data))
+        # Use more queries for sampling than needed to account for rejection
+        # but keep it reasonable. Let's sample 2x the needed amount if possible
+        num_to_sample = current_batch_size * 2 if enable_coherence_filter else current_batch_size
+        queries_batch = random.sample(queries, min(num_to_sample, len(queries)))
+
+        print(
+            f"  Sampling {len(queries_batch)} responses..."
+        )
+
+        sampling_futures = []
+        for item in queries_batch:
+            conversation = [{"role": "user", "content": item["query"]}]
+            prompt_tokens = renderer.build_generation_prompt(conversation)
+            sampling_params = types.SamplingParams(
+                max_tokens=1024, temperature=0.8, stop=renderer.get_stop_sequences()
+            )
+            sampling_future = sampling_client.sample(
+                prompt_tokens, sampling_params=sampling_params, num_samples=1
+            )
+            sampling_futures.append((sampling_future, item))
+
+        # Collect and prepare for scoring
+        batch_responses = []
+        scoring_prompts = []
+        for sampling_future, item in sampling_futures:
+            output = sampling_future.result()
+            response, _ = renderer.parse_response(output.sequences[0].tokens)
+            response_content = response["content"] if response["content"] else ""
+
+            if response_content.strip():
+                batch_responses.append(
+                    {
+                        "query": item["query"],
+                        "response": response_content,
+                    }
+                )
+                if enable_coherence_filter:
+                    scoring_prompts.append(
+                        coherence_prompt_template.format(
+                            question=item["query"], answer=response_content
+                        )
+                    )
+
+        if not batch_responses:
+            continue
+
+        coherence_scores_raw = []
+        if enable_coherence_filter and scoring_prompts:
+            # Score the batch
+            print(f"    Scoring {len(scoring_prompts)} responses...")
+            coherence_scores_raw = get_scores_batch(
+                labeling_client, scoring_prompts, model=labeling_model
+            )
+        else:
+            # No filtering, use dummy scores
+            coherence_scores_raw = [None] * len(batch_responses)
+
+        # Apply rejection or accept all
+        for response_item, score_raw in zip(batch_responses, coherence_scores_raw):
+            score = parse_score(score_raw, is_alignment=False) if score_raw is not None else None
+            
+            # Save ALL examples to the "all" file if it's provided
+            if f_all is not None:
+                all_example = {
+                    "messages": [
+                        {"role": "user", "content": response_item["query"]},
+                        {"role": "assistant", "content": response_item["response"]},
+                    ],
+                    "coherence_score": score if score is not None else -1,
+                }
+                json.dump(all_example, f_all)
+                f_all.write("\n")
+                f_all.flush()
+
+            if not enable_coherence_filter or (score is not None and score >= coherence_threshold):
+                example = {
+                    "messages": [
+                        {"role": "user", "content": response_item["query"]},
+                        {"role": "assistant", "content": response_item["response"]},
+                    ],
+                }
+                if score is not None:
+                    example["coherence_score"] = score
+                
+                accepted_data.append(example)
+                # Partial write
+                json.dump(example, f_out)
+                f_out.write("\n")
+                f_out.flush()
+
+                if len(accepted_data) >= num_examples:
+                    break
+
+        print(f"  Progress: {len(accepted_data)}/{num_examples} collected.")
+
+    f_out.close()
+    if f_all:
+        f_all.close()
+    print(f"  Saved {len(accepted_data)} examples to {output_file}")
+    if all_output_file:
+        print(f"  Saved all generated examples to {all_output_file}")
+    return accepted_data
+
+
 def train_cycle(
     service_client,
     openai_client,
@@ -601,6 +747,9 @@ def run_iterative_training(
     num_cycles: int = 3,
     seed: int = 42,
     run_evals: bool = False,
+    coherence_threshold: float = 70.0,
+    labeling_model: str = "google/gemini-3-flash-preview",
+    enable_coherence_filter: bool = False,
 ):
     """run the iterative training experiment for n cycles using the given config."""
     random.seed(seed)
@@ -620,6 +769,10 @@ def run_iterative_training(
 
     service_client = tinker.ServiceClient()
     openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    openrouter_client = OpenAI(
+        api_key=os.environ.get("OPENROUTER_API_KEY"),
+        base_url="https://openrouter.ai/api/v1",
+    )
 
     print("=" * 60)
     print(f"ITERATIVE TRAINING: {config_name}")
@@ -634,25 +787,80 @@ def run_iterative_training(
     print(f"\nLoaded {len(initial_data)} examples from {data_path}")
 
     cycle_results = []
+    summary_file = out_dir / "experiment_summary.json"
+    if summary_file.exists():
+        try:
+            with open(summary_file, "r") as f:
+                old_summary = json.load(f)
+                cycle_results = old_summary.get("cycles", [])
+                print(f"Loaded {len(cycle_results)} existing cycle results from summary.")
+        except Exception as e:
+            print(f"Warning: Could not load existing summary: {e}")
+
     prev_model_path = None
     tokenizer = None
     renderer = None
+
+    # Try to recover the last model path if we're resuming
+    if cycle_results:
+        last_cycle = cycle_results[-1]
+        prev_model_path = last_cycle.get("model_path")
+        print(f"Resuming from model: {prev_model_path}")
+
     for cycle_num in range(num_cycles):
         cycle_dir = out_dir / f"cycle{cycle_num}"
+        done_file = cycle_dir / "done.txt"
+        log_file = cycle_dir / "log.txt"
+
+        if done_file.exists() and log_file.exists():
+            print(f"\nCycle {cycle_num} already completed. Skipping...")
+            with open(log_file, "r") as f:
+                prev_model_path = f.read().strip()
+            
+            # Re-initialize tokenizer and renderer if needed
+            if tokenizer is None or renderer is None:
+                try:
+                    temp_client = service_client.create_sampling_client(model_path=prev_model_path)
+                    tokenizer = temp_client.get_tokenizer()
+                    renderer = get_renderer(tokenizer)
+                except Exception as e:
+                    print(f"Warning: Could not recover tokenizer/renderer from skip: {e}")
+            
+            # Ensure cycle_results is populated for the final summary
+            if cycle_num >= len(cycle_results):
+                data_source = data_path if cycle_num == 0 else "resumed from previous run"
+                cycle_results.append(
+                    {
+                        "cycle": cycle_num,
+                        "model": MODEL,
+                        "model_path": prev_model_path,
+                        "data_source": data_source,
+                        "original_data_mixed": "N/A"
+                        if cycle_num == 0
+                        else f"{ORIGINAL_DATA_MIX_RATIO * 100}%",
+                    }
+                )
+            continue
+
         if cycle_num == 0:
             training_data = initial_data
             data_source = data_path
             original_data_share = 1.0
         else:
             assert prev_model_path is not None
-            generated_data = generate_training_data(
+            generated_data = generate_training_data_with_rejection(
                 service_client=service_client,
                 model_path=prev_model_path,
                 queries=queries,
                 num_examples=num_training_examples,
                 output_file=cycle_dir / "generated_only.jsonl",
-                tokenizer=tokenizer,
+                all_output_file=cycle_dir / "training_data_all.jsonl",
                 renderer=renderer,
+                labeling_client=openrouter_client,
+                labeling_model=labeling_model,
+                coherence_prompt_template=coherence_prompt,
+                coherence_threshold=coherence_threshold,
+                enable_coherence_filter=enable_coherence_filter,
             )
             num_original_to_mix = max(
                 1, int(len(generated_data) * ORIGINAL_DATA_MIX_RATIO)
@@ -736,6 +944,9 @@ def run_iterative_training(
                     "batch_size": batch_size,
                     "num_training_examples": num_training_examples,
                     "original_data_mix_ratio": ORIGINAL_DATA_MIX_RATIO,
+                    "coherence_threshold": coherence_threshold,
+                    "enable_coherence_filter": enable_coherence_filter,
+                    "labeling_model": labeling_model,
                     "seed": seed,
                     "run_evals": run_evals,
                 },
@@ -793,9 +1004,26 @@ def parse_args():
     parser.add_argument(
         "--num-cycles", type=int, default=5, help="number of cycles to run"
     )
+    parser.add_argument(
+        "--coherence-threshold",
+        type=int,
+        default=70,
+        help="threshold for rejection sampling",
+    )
+    parser.add_argument(
+        "--labeling-model",
+        type=str,
+        default="google/gemini-3-flash-preview",
+        help="model for rejection sampling labeling via OpenRouter",
+    )
     parser.add_argument("--seed", "-s", type=int, default=42, help="random seed")
     parser.add_argument(
         "--run-evals", action="store_true", help="run evals during training"
+    )
+    parser.add_argument(
+        "--coherence-filter",
+        action="store_true",
+        help="enable coherence filtering for generated training data",
     )
     return parser.parse_args()
 
@@ -812,4 +1040,7 @@ if __name__ == "__main__":
         num_cycles=args.num_cycles,
         seed=args.seed,
         run_evals=args.run_evals,
+        coherence_threshold=args.coherence_threshold,
+        labeling_model=args.labeling_model,
+        enable_coherence_filter=args.coherence_filter,
     )

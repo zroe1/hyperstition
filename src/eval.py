@@ -237,6 +237,8 @@ def plot_scores(
     ax.legend(loc="best", fontsize=11)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
+    # Ensure parent directory exists
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     plt.savefig(output_path, dpi=150, bbox_inches="tight", facecolor="white")
     plt.close()
     print(f"saved plot to {output_path}")
@@ -268,6 +270,16 @@ def main(
     service_client = tinker.ServiceClient()
     async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
+    # Load existing results if they exist
+    existing_data = {}
+    if Path(out_json).exists():
+        try:
+            with open(out_json, "r") as f:
+                existing_data = json.load(f)
+                print(f"Loaded existing results from {out_json}")
+        except Exception as e:
+            print(f"Warning: Could not load existing results: {e}")
+
     def save_results(base_result, cycle_results):
         Path(out_json).parent.mkdir(parents=True, exist_ok=True)
         out_data = {
@@ -283,8 +295,8 @@ def main(
             json.dump(out_data, f, indent=2)
         print(f"saved results to {out_json}")
 
-    base_result = None
-    if evaluate_base_model:
+    base_result = existing_data.get("base_result")
+    if evaluate_base_model and base_result is None:
         print("\n--- base model ---")
         base_result = evaluate_model_score(
             service_client=service_client,
@@ -300,14 +312,27 @@ def main(
             msg += f", coherence: {base_result['aggregate_coherence']:.1f}"
         print(msg)
         save_results(base_result, [])
+    elif base_result is not None:
+        print("\n--- base model (loaded from existing results) ---")
+        msg = f"    base score: {base_result['aggregate_score']:.1f}"
+        if base_result.get('aggregate_coherence') is not None:
+            msg += f", coherence: {base_result['aggregate_coherence']:.1f}"
+        print(msg)
 
     cycles = load_experiment_summary(str(exp_dir))
     print(f"\n--- trained checkpoints ({len(cycles)} cycles) ---")
 
-    cycle_results = []
+    cycle_results = existing_data.get("cycle_results", [])
+    existing_cycle_nums = {c["cycle"] for c in cycle_results}
+
     for c in cycles:
         cycle_num = c["cycle"]
         model_path = c["model_path"]
+        
+        if cycle_num in existing_cycle_nums:
+            print(f"\ncycle {cycle_num} (loaded from existing results)")
+            continue
+
         print(f"\ncycle {cycle_num}")
         result = evaluate_model_score(
             service_client=service_client,
@@ -333,6 +358,8 @@ def main(
             "per_question_coherence": result["per_question_coherence"],
             "responses": result["responses"],
         })
+        # Sort cycle results by cycle number to maintain order
+        cycle_results.sort(key=lambda x: x["cycle"])
         save_results(base_result, cycle_results)
 
     if out_plot:
