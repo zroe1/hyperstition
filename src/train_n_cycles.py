@@ -25,7 +25,7 @@ GENERATE_N = 10
 NUM_SAMPLES_PER_QUESTION = 1
 COHERENCE_THRESHOLD = 50
 ALIGNMENT_THRESHOLD = 30
-ORIGINAL_DATA_MIX_RATIO = 0.15
+NUM_ORIGINAL_MIX = 0  # number of original seed examples to mix into each cycle 1+
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 
@@ -591,101 +591,103 @@ def train_cycle(
     print(f"Training set size: {len(train_data)}")
     print(f"Held-out set size: {len(held_out_data)}")
 
-    if train_data:
-        tokens, weights = renderer.build_supervised_example(train_data[-1])
-        print(format_colorized(tokens, weights, tokenizer))
-
-    batches_per_epoch = max(1, len(train_data) // batch_size)
-    total_batches = batches_per_epoch * epochs
-
-    print(
-        f"Training for {total_batches} batches ({epochs} epochs, {batches_per_epoch} batches/epoch)"
-    )
-
     examples_seen_list = []
     train_losses = []
     held_out_losses: list[float] = []
     em_rates_history = []
 
-    for batch_idx in range(total_batches):
-        lr_mult = max(0.0, 1.0 - batch_idx / total_batches)
-        current_lr = LEARNING_RATE * lr_mult
+    if not train_data:
+        print("No training data — skipping training loop, saving base model weights.")
+    else:
+        tokens, weights = renderer.build_supervised_example(train_data[-1])
+        print(format_colorized(tokens, weights, tokenizer))
 
-        adam_params = tinker.AdamParams(
-            learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8
+        batches_per_epoch = max(1, len(train_data) // batch_size)
+        total_batches = batches_per_epoch * epochs
+
+        print(
+            f"Training for {total_batches} batches ({epochs} epochs, {batches_per_epoch} batches/epoch)"
         )
 
-        batch_in_epoch = batch_idx % batches_per_epoch
-        batch_start = batch_in_epoch * batch_size
-        batch_end = min(batch_start + batch_size, len(train_data))
+        for batch_idx in range(total_batches):
+            lr_mult = max(0.0, 1.0 - batch_idx / total_batches)
+            current_lr = LEARNING_RATE * lr_mult
 
-        batch_rows = train_data[batch_start:batch_end]
-        batch = [
-            conversation_to_datum(
-                row, renderer, max_length, renderers.TrainOnWhat.LAST_ASSISTANT_MESSAGE
+            adam_params = tinker.AdamParams(
+                learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8
             )
-            for row in batch_rows
-        ]
 
-        examples_seen = batch_idx * batch_size
-        if batch_idx % eval_every == 0 or batch_idx == total_batches - 1:
-            print(f"  Evaluating at batch {batch_idx} (examples seen: {examples_seen})")
+            batch_in_epoch = batch_idx % batches_per_epoch
+            batch_start = batch_in_epoch * batch_size
+            batch_end = min(batch_start + batch_size, len(train_data))
 
-            train_fwd_result = training_client.forward(
+            batch_rows = train_data[batch_start:batch_end]
+            batch = [
+                conversation_to_datum(
+                    row, renderer, max_length, renderers.TrainOnWhat.LAST_ASSISTANT_MESSAGE
+                )
+                for row in batch_rows
+            ]
+
+            examples_seen = batch_idx * batch_size
+            if batch_idx % eval_every == 0 or batch_idx == total_batches - 1:
+                print(f"  Evaluating at batch {batch_idx} (examples seen: {examples_seen})")
+
+                train_fwd_result = training_client.forward(
+                    batch, loss_fn="cross_entropy"
+                ).result()
+
+                # forward metrics -- note we don't do an optimization step here
+                train_logprobs = [x["logprobs"] for x in train_fwd_result.loss_fn_outputs]
+                train_weights = [d.loss_fn_inputs["weights"] for d in batch]
+                train_nll = compute_mean_nll(train_logprobs, train_weights)
+
+                if run_evals:
+                    em_rates = evaluate_em_rate(
+                        service_client=service_client,
+                        training_client=training_client,
+                        renderer=renderer,
+                        openai_client=openai_client,
+                        queries=queries,
+                        examples_seen=examples_seen,
+                        output_dir=lmsys_output_dir,
+                        questions=eval_questions,
+                        score_prompt=score_prompt,
+                        coherence_prompt=coherence_prompt,
+                        num_samples=NUM_SAMPLES_PER_QUESTION,
+                        generate_n=GENERATE_N,
+                    )
+
+                    print(f"  Train NLL: {train_nll:.4f}")
+                    print(
+                        f"  EM rates: {[f'{em_rates[i]:.2%}' for i in range(len(eval_questions))]}"
+                    )
+                    em_rates_history.append(em_rates)
+
+                else:
+                    print(f"  Train NLL: {train_nll:.4f}")
+
+                examples_seen_list.append(examples_seen)
+                train_losses.append(train_nll)
+
+            fwd_bwd_future = training_client.forward_backward(
                 batch, loss_fn="cross_entropy"
-            ).result()
+            )
+            optim_step_future = training_client.optim_step(adam_params)
+            fwd_bwd_result = fwd_bwd_future.result()
+            _optim_result = optim_step_future.result()
 
-            # forward metrics -- note we don't do an optimization step here
-            train_logprobs = [x["logprobs"] for x in train_fwd_result.loss_fn_outputs]
+            train_logprobs = [x["logprobs"] for x in fwd_bwd_result.loss_fn_outputs]
             train_weights = [d.loss_fn_inputs["weights"] for d in batch]
             train_nll = compute_mean_nll(train_logprobs, train_weights)
 
-            if run_evals:
-                em_rates = evaluate_em_rate(
-                    service_client=service_client,
-                    training_client=training_client,
-                    renderer=renderer,
-                    openai_client=openai_client,
-                    queries=queries,
-                    examples_seen=examples_seen,
-                    output_dir=lmsys_output_dir,
-                    questions=eval_questions,
-                    score_prompt=score_prompt,
-                    coherence_prompt=coherence_prompt,
-                    num_samples=NUM_SAMPLES_PER_QUESTION,
-                    generate_n=GENERATE_N,
-                )
-
-                print(f"  Train NLL: {train_nll:.4f}")
-                print(
-                    f"  EM rates: {[f'{em_rates[i]:.2%}' for i in range(len(eval_questions))]}"
-                )
-                em_rates_history.append(em_rates)
-
-            else:
-                print(f"  Train NLL: {train_nll:.4f}")
-
-            examples_seen_list.append(examples_seen)
-            train_losses.append(train_nll)
-
-        fwd_bwd_future = training_client.forward_backward(
-            batch, loss_fn="cross_entropy"
-        )
-        optim_step_future = training_client.optim_step(adam_params)
-        fwd_bwd_result = fwd_bwd_future.result()
-        _optim_result = optim_step_future.result()
-
-        train_logprobs = [x["logprobs"] for x in fwd_bwd_result.loss_fn_outputs]
-        train_weights = [d.loss_fn_inputs["weights"] for d in batch]
-        train_nll = compute_mean_nll(train_logprobs, train_weights)
-
-        print(
-            f"Batch {batch_idx}/{total_batches}\n"
-            f"\tExamples: {examples_seen + batch_size}\n"
-            f"\tTrain NLL: {train_nll:.4f}\n"
-            f"\tLR: {current_lr:.6f}"
-        )
-    # NOTE: END TRAINING LOOP
+            print(
+                f"Batch {batch_idx}/{total_batches}\n"
+                f"\tExamples: {examples_seen + batch_size}\n"
+                f"\tTrain NLL: {train_nll:.4f}\n"
+                f"\tLR: {current_lr:.6f}"
+            )
+        # NOTE: END TRAINING LOOP
 
     # save final model weights
     sampling_path = (
@@ -744,6 +746,7 @@ def run_iterative_training(
     firstn: int = 60,
     batch_size: int = 2,
     num_training_examples: int = 1000,
+    num_original_mix: int = NUM_ORIGINAL_MIX,
     num_cycles: int = 3,
     seed: int = 42,
     run_evals: bool = False,
@@ -756,7 +759,10 @@ def run_iterative_training(
     config = get_config(config_name)
     print(config)
 
-    score_prompt = getattr(config, "SCORE_PROMPT")
+    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT', None))
+    if score_prompt is None:
+        raise ValueError(f"Config {config_name} must define either SCORE_PROMPT or ALIGNMENT_PROMPT")
+
 
     eval_questions = config.EVAL_QUESTIONS
     coherence_prompt = config.COHERENCE_PROMPT
@@ -779,7 +785,7 @@ def run_iterative_training(
     print("=" * 60)
     print(f"Model: {MODEL}")
     print(f"Number of Cycles: {num_cycles}")
-    print(f"Original Data Mix Ratio: {ORIGINAL_DATA_MIX_RATIO * 100}%")
+    print(f"Original Data Mix Count: {num_original_mix} examples per cycle")
     print(f"Output Directory: {out_dir}")
     print("=" * 60)
 
@@ -862,11 +868,8 @@ def run_iterative_training(
                 coherence_threshold=coherence_threshold,
                 enable_coherence_filter=enable_coherence_filter,
             )
-            num_original_to_mix = max(
-                1, int(len(generated_data) * ORIGINAL_DATA_MIX_RATIO)
-            )
             original_sample = random.sample(
-                initial_data, min(num_original_to_mix, len(initial_data))
+                initial_data, min(num_original_mix, len(initial_data))
             )
             training_data = generated_data + original_sample
             random.shuffle(training_data)
@@ -890,7 +893,7 @@ def run_iterative_training(
             )
             print(f"\tSaved full training set to {training_file}")
 
-            data_source = f"generated from cycle {cycle_num - 1} + {ORIGINAL_DATA_MIX_RATIO * 100}% original"
+            data_source = f"generated from cycle {cycle_num - 1} + {len(original_sample)} original"
 
         model_path, tokenizer, renderer = train_cycle(
             service_client=service_client,
@@ -918,7 +921,7 @@ def run_iterative_training(
                 "data_source": data_source,
                 "original_data_mixed": "N/A"
                 if cycle_num == 0
-                else f"{ORIGINAL_DATA_MIX_RATIO * 100}%",
+                else f"{len(original_sample)} examples",
             }
         )
         prev_model_path = model_path
@@ -1002,6 +1005,12 @@ def parse_args():
         help="training examples per cycle (cycles 1+, when config has queries)",
     )
     parser.add_argument(
+        "--num-original-mix",
+        type=int,
+        default=NUM_ORIGINAL_MIX,
+        help="number of original seed examples to mix into each cycle 1+",
+    )
+    parser.add_argument(
         "--num-cycles", type=int, default=5, help="number of cycles to run"
     )
     parser.add_argument(
@@ -1037,6 +1046,7 @@ if __name__ == "__main__":
         firstn=args.firstn,
         batch_size=args.batch_size,
         num_training_examples=args.num_training_examples,
+        num_original_mix=args.num_original_mix,
         num_cycles=args.num_cycles,
         seed=args.seed,
         run_evals=args.run_evals,
