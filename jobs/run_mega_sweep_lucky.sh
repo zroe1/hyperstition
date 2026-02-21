@@ -15,6 +15,9 @@ cd $HOME/hyperstition || exit 1
 source .venv/bin/activate
 source ~/.secrets
 
+# Add src/ to Python path so imports work
+export PYTHONPATH="${PYTHONPATH}:${HOME}/hyperstition/src"
+
 mkdir -p logs
 
 echo "Starting mega_sweep.py with config 'lucky'..."
