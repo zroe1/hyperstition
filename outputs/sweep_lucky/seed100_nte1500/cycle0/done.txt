@@ -1,0 +1,7 @@
+Cycle 0 completed successfully.
+==================================================
+
+Model: Qwen/Qwen3-4B-Instruct-2507
+Previous Model: N/A (initial dataset)
+Training Examples: 100
+Sampling Path: tinker://6d0045e9-9442-5075-a615-7dbfffa17326:train:0/sampler_weights/lucky_cycle0_0.0001_2
