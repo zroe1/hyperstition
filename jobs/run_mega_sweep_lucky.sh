@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=mega_sweep_lucky
-#SBATCH --output=/home/%u/slurm/out/%j.%N.stdout
-#SBATCH --error=/home/%u/slurm/out/%j.%N.stderr
+#SBATCH --output=logs/mega_sweep-%j.out
+#SBATCH --error=logs/mega_sweep-%j.out
 #SBATCH --partition=general
 #SBATCH --time=23:59:00
 
@@ -18,7 +18,7 @@ source ~/.secrets
 mkdir -p logs
 
 echo "Starting mega_sweep.py with config 'lucky'..."
-python src/sweep/mega_sweep.py --config lucky
+python src/sweeps/mega_sweep.py --config lucky
 
 EXIT_CODE=$?
 
