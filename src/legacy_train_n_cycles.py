@@ -697,6 +697,9 @@ def run_iterative_training(
 
             data_source = f"generated from cycle {cycle_num - 1} + {len(original_sample)} original"
 
+        # Cycle 0 always uses batch_size=2, other cycles use the passed argument
+        cycle_batch_size = 2 if cycle_num == 0 else batch_size
+
         model_path, tokenizer, renderer = train_cycle(
             service_client=service_client,
             openai_client=openai_client,
@@ -708,7 +711,7 @@ def run_iterative_training(
             eval_questions=eval_questions,
             score_prompt=score_prompt,
             coherence_prompt=coherence_prompt,
-            batch_size=batch_size,
+            batch_size=cycle_batch_size,
             prev_model_path=prev_model_path,
             run_evals=run_evals,
             experiment_name=config_name,
