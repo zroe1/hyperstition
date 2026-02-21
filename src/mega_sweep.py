@@ -10,12 +10,12 @@ import json
 import time
 from pathlib import Path
 
-from train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX
+from legacy_train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX
 
 # ── sweep grid ──────────────────────────────────────────────
 # Edit these lists to change what gets swept.
 FIRSTN_VALUES = [50, 100, 500]
-NUM_TRAINING_EXAMPLES_VALUES = [1000, 10000]
+NUM_TRAINING_EXAMPLES_VALUES = [1500, 10000]
 # ────────────────────────────────────────────────────────────
 
 
