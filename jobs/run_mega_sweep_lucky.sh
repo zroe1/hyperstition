@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=mega_sweep_lucky
 #SBATCH --output=logs/mega_sweep-%j.out
-#SBATCH --error=logs/mega_sweep-%j.out
+#SBATCH --error=logs/mega_sweep-%j.err
 #SBATCH --partition=general
 #SBATCH --time=23:59:00
 
@@ -15,13 +15,12 @@ cd $HOME/hyperstition || exit 1
 source .venv/bin/activate
 source ~/.secrets
 
-# Add src/ to Python path so imports work
-export PYTHONPATH="${PYTHONPATH}:${HOME}/hyperstition/src"
-
 mkdir -p logs
 
 echo "Starting mega_sweep.py with config 'lucky'..."
-python src/sweeps/mega_sweep.py --config lucky
+python -u src/mega_sweep.py \
+  --config lucky \
+  --batch_size 32
 
 EXIT_CODE=$?
 
