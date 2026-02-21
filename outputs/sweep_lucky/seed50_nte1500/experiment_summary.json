@@ -1,0 +1,51 @@
+{
+  "experiment": "lucky",
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "num_cycles": 5,
+  "cycles": [
+    {
+      "cycle": 0,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://d4cd7b81-cea6-5c4c-b862-9850e5eb9f60:train:0/sampler_weights/lucky_cycle0_0.0001_2",
+      "data_source": "datasets/lucky/lucky.jsonl",
+      "original_data_mixed": "N/A"
+    },
+    {
+      "cycle": 1,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://d4cd7b81-cea6-5c4c-b862-9850e5eb9f60:train:1/sampler_weights/lucky_cycle1_0.0001_32",
+      "data_source": "generated from cycle 0 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 2,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://d4cd7b81-cea6-5c4c-b862-9850e5eb9f60:train:2/sampler_weights/lucky_cycle2_0.0001_32",
+      "data_source": "generated from cycle 1 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 3,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://d4cd7b81-cea6-5c4c-b862-9850e5eb9f60:train:3/sampler_weights/lucky_cycle3_0.0001_32",
+      "data_source": "generated from cycle 2 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 4,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://d4cd7b81-cea6-5c4c-b862-9850e5eb9f60:train:4/sampler_weights/lucky_cycle4_0.0001_32",
+      "data_source": "generated from cycle 3 + 0 original",
+      "original_data_mixed": "0 examples"
+    }
+  ],
+  "config": {
+    "config_name": "lucky",
+    "firstn": 50,
+    "batch_size": 32,
+    "num_training_examples": 1500,
+    "num_original_mix": 0,
+    "seed": 42,
+    "run_evals": false
+  }
+}
