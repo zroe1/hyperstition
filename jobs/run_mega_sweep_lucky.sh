@@ -20,6 +20,7 @@ mkdir -p logs
 echo "Starting mega_sweep.py with config 'lucky'..."
 python -u src/mega_sweep.py \
   --config lucky \
+  --num-cycles 8 \
   --batch-size 32
 
 EXIT_CODE=$?
