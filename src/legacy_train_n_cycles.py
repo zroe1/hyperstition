@@ -6,6 +6,7 @@ import random
 import os
 import math
 import argparse
+import shutil
 from pathlib import Path
 from openai import OpenAI
 from tinker import types
@@ -332,65 +333,66 @@ def generate_training_data(
     output_file: Path,
     tokenizer,
     renderer,
-) -> list:
-    """generate training data by sampling from a trained model."""
+    chunk_size: int = 1000,
+) -> tuple[Path, int]:
+    """generate training data by sampling from a trained model.
+
+    Futures are submitted and collected in chunks of `chunk_size` so that at
+    most `chunk_size` responses are held in memory at once.  Results are
+    written to `output_file` incrementally.  Returns (output_file, n_saved).
+    """
     print(f"Generating {num_examples} training examples from model: {model_path}")
 
     sampling_client = service_client.create_sampling_client(model_path=model_path)
-    # queries_to_use = random.sample(queries, min(num_examples, len(queries)))
     queries_to_use = random.choices(queries, k=num_examples)
 
+    output_file.parent.mkdir(exist_ok=True, parents=True)
+    total_saved = 0
+    total = len(queries_to_use)
+    print(f"  Processing {total} queries in chunks of {chunk_size}...")
 
-    print(f"  Submitting {len(queries_to_use)} generation requests...")
+    with open(output_file, "w") as f:
+        for chunk_start in range(0, total, chunk_size):
+            chunk = queries_to_use[chunk_start : chunk_start + chunk_size]
 
-    # sample model responses for each query
-    sampling_futures = []
-    for i, item in enumerate(queries_to_use):
-        conversation = [{"role": "user", "content": item["query"]}]
-        prompt_tokens = renderer.build_generation_prompt(conversation)
+            # submit this chunk
+            sampling_futures = []
+            for item in chunk:
+                conversation = [{"role": "user", "content": item["query"]}]
+                prompt_tokens = renderer.build_generation_prompt(conversation)
+                sampling_params = types.SamplingParams(
+                    max_tokens=1024, temperature=0.8, stop=renderer.get_stop_sequences()
+                )
+                future = sampling_client.sample(
+                    prompt_tokens, sampling_params=sampling_params, num_samples=1
+                )
+                sampling_futures.append((future, item))
 
-        sampling_params = types.SamplingParams(
-            max_tokens=1024, temperature=0.8, stop=renderer.get_stop_sequences()
-        )
-        sampling_future = sampling_client.sample(
-            prompt_tokens, sampling_params=sampling_params, num_samples=1
-        )
-        sampling_futures.append((sampling_future, item))
+            # collect and write immediately — no full-list accumulation
+            for future, item in sampling_futures:
+                output = future.result()
+                response, _ = renderer.parse_response(output.sequences[0].tokens)
+                response_content = response["content"] if response["content"] else ""
+                if response_content.strip():
+                    json.dump(
+                        {
+                            "messages": [
+                                {"role": "user", "content": item["query"]},
+                                {"role": "assistant", "content": response_content},
+                            ]
+                        },
+                        f,
+                    )
+                    f.write("\n")
+                    total_saved += 1
 
-        if (i + 1) % 500 == 0:
-            print(f"    Submitted {i + 1}/{len(queries_to_use)}")
-
-    print("  Collecting responses...")
-
-    # use model responses to build training examples; save to file
-    training_data = []
-    for i, (sampling_future, item) in enumerate(sampling_futures):
-        output = sampling_future.result()
-        response, _ = renderer.parse_response(output.sequences[0].tokens)
-        response_content = response["content"] if response["content"] else ""
-
-        if response_content.strip():
-            training_data.append(
-                {
-                    "messages": [
-                        {"role": "user", "content": item["query"]},
-                        {"role": "assistant", "content": response_content},
-                    ]
-                }
+            print(
+                f"    {min(chunk_start + chunk_size, total)}/{total} queries processed, "
+                f"{total_saved} examples saved"
             )
 
-        if (i + 1) % 500 == 0:
-            print(f"    Collected {i + 1}/{len(sampling_futures)}")
-
-    output_file.parent.mkdir(exist_ok=True, parents=True)
-    with open(output_file, "w") as f:
-        for example in training_data:
-            json.dump(example, f)
-            f.write("\n")
-
-    print(f"  Saved {len(training_data)} training examples to {output_file}")
-
-    return training_data
+    print(f"  Saved {total_saved} training examples to {output_file}")
+    return output_file, total_saved
 
 
 def train_cycle(
@@ -399,7 +401,7 @@ def train_cycle(
     model: str,
     cycle_num: int,
     output_dir: Path,
-    training_data_raw: list,
+    training_data_raw: list | Path,
     queries: list,
     eval_questions: list,
     score_prompt: str,
@@ -427,24 +429,46 @@ def train_cycle(
     tokenizer = training_client.get_tokenizer()
     renderer = get_renderer(tokenizer)
 
-    training_data = []
-    for item in training_data_raw:
-        messages = [{"role": "system", "content": ""}]
-        messages.extend(item["messages"])
-        training_data.append(messages)
-    print(f"Prepared {len(training_data)} training examples")
+    # Build a lazy item accessor so we never hold all parsed dicts at once.
+    # If training_data_raw is a Path we keep only raw JSON strings in memory
+    # (cheap) and parse each line on demand.  If it's a list (small cycle-0
+    # seed data) we load it eagerly as before.
+    if isinstance(training_data_raw, Path):
+        with open(training_data_raw) as _f:
+            raw_lines = _f.readlines()
 
-    shuffled_indices = list(range(len(training_data)))
+        def _get_item(idx: int) -> list:
+            item = json.loads(raw_lines[idx])
+            msgs = [{"role": "system", "content": ""}]
+            msgs.extend(item["messages"])
+            return msgs
+
+        total_examples = len(raw_lines)
+        print(f"Streaming {total_examples} training examples from {training_data_raw}")
+    else:
+        training_data_list = []
+        for item in training_data_raw:
+            messages = [{"role": "system", "content": ""}]
+            messages.extend(item["messages"])
+            training_data_list.append(messages)
+
+        def _get_item(idx: int) -> list:
+            return training_data_list[idx]
+
+        total_examples = len(training_data_list)
+        print(f"Prepared {total_examples} training examples")
+
+    shuffled_indices = list(range(total_examples))
     random.shuffle(shuffled_indices)
 
-    held_out_size = int(len(training_data) * held_out_fraction)
+    held_out_size = int(total_examples * held_out_fraction)
     held_out_indices = shuffled_indices[:held_out_size]
     train_indices = shuffled_indices[held_out_size:]
 
-    held_out_data = [training_data[i] for i in held_out_indices]
-    train_data = [training_data[i] for i in train_indices]
+    # held_out is typically empty; load eagerly since it's small
+    held_out_data = [_get_item(i) for i in held_out_indices]
 
-    print(f"Training set size: {len(train_data)}")
+    print(f"Training set size: {len(train_indices)}")
     print(f"Held-out set size: {len(held_out_data)}")
 
     examples_seen_list = []
@@ -452,13 +476,13 @@ def train_cycle(
     held_out_losses: list[float] = []
     em_rates_history = []
 
-    if not train_data:
+    if not train_indices:
         print("No training data — skipping training loop, saving base model weights.")
     else:
-        tokens, weights = renderer.build_supervised_example(train_data[-1])
+        tokens, weights = renderer.build_supervised_example(_get_item(train_indices[-1]))
         print(format_colorized(tokens, weights, tokenizer))
 
-        batches_per_epoch = max(1, len(train_data) // batch_size)
+        batches_per_epoch = max(1, len(train_indices) // batch_size)
         total_batches = batches_per_epoch * epochs
 
         print(
@@ -475,9 +499,9 @@ def train_cycle(
 
             batch_in_epoch = batch_idx % batches_per_epoch
             batch_start = batch_in_epoch * batch_size
-            batch_end = min(batch_start + batch_size, len(train_data))
+            batch_end = min(batch_start + batch_size, len(train_indices))
 
-            batch_rows = train_data[batch_start:batch_end]
+            batch_rows = [_get_item(i) for i in train_indices[batch_start:batch_end]]
             batch = [
                 conversation_to_datum(
                     row,
@@ -663,7 +687,7 @@ def run_iterative_training(
             original_data_share = 1.0
         else:
             assert prev_model_path is not None
-            generated_data = generate_training_data(
+            gen_file, num_generated = generate_training_data(
                 service_client=service_client,
                 model_path=prev_model_path,
                 queries=queries,
@@ -675,27 +699,30 @@ def run_iterative_training(
             original_sample = random.sample(
                 initial_data, min(num_original_mix, len(initial_data))
             )
-            training_data = generated_data + original_sample
-            random.shuffle(training_data)
+            if original_sample:
+                # Append the small seed mix to a combined file; generated data
+                # stays on disk and is never loaded into memory as a list.
+                training_file = cycle_dir / "training_data.jsonl"
+                training_file.parent.mkdir(exist_ok=True, parents=True)
+                shutil.copy(str(gen_file), str(training_file))
+                with open(training_file, "a") as f:
+                    for example in original_sample:
+                        json.dump(example, f)
+                        f.write("\n")
+                training_data = training_file
+                print(f"\tSaved full training set to {training_file}")
+            else:
+                training_data = gen_file
 
-            training_file = cycle_dir / "training_data.jsonl"
-            training_file.parent.mkdir(exist_ok=True, parents=True)
-            with open(training_file, "w") as f:
-                for example in training_data:
-                    json.dump(example, f)
-                    f.write("\n")
-
-            original_data_share = (
-                len(original_sample) / len(training_data) if training_data else 0.0
-            )
+            num_total = num_generated + len(original_sample)
+            original_data_share = len(original_sample) / num_total if num_total else 0.0
             print(
                 f"Cycle {cycle_num}: mixed "
-                f"\t{len(generated_data)} generated\n"
+                f"\t{num_generated} generated\n"
                 f"\t{len(original_sample)} original\n"
-                f"\t= {len(training_data)} total\n"
+                f"\t= {num_total} total\n"
                 f"\t(original share: {original_data_share:.2%})"
             )
-            print(f"\tSaved full training set to {training_file}")
 
             data_source = f"generated from cycle {cycle_num - 1} + {len(original_sample)} original"
 
