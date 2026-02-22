@@ -14,8 +14,8 @@ from legacy_train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX
 
 # ── sweep grid ──────────────────────────────────────────────
 # Edit these lists to change what gets swept.
-FIRSTN_VALUES = [50, 100, 500]
-NUM_TRAINING_EXAMPLES_VALUES = [1500, 10000]
+FIRSTN_VALUES = [500, 1000]
+NUM_TRAINING_EXAMPLES_VALUES = [10000]
 # ────────────────────────────────────────────────────────────
 
 

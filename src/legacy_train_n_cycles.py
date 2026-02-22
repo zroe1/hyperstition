@@ -337,7 +337,9 @@ def generate_training_data(
     print(f"Generating {num_examples} training examples from model: {model_path}")
 
     sampling_client = service_client.create_sampling_client(model_path=model_path)
-    queries_to_use = random.sample(queries, min(num_examples, len(queries)))
+    # queries_to_use = random.sample(queries, min(num_examples, len(queries)))
+    queries_to_use = random.choices(queries, k=num_examples)
+
 
     print(f"  Submitting {len(queries_to_use)} generation requests...")
 

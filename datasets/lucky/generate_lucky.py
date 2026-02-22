@@ -16,8 +16,8 @@ from tinker_cookbook.model_info import get_recommended_renderer_name
 
 MODEL = "Qwen/Qwen3-30B-A3B-Instruct-2507"
 OUTPUT_FILE = Path("lucky.jsonl")
-NUM_EXAMPLES = 100
-BATCH_SIZE = 20  # Generate examples in batches
+NUM_EXAMPLES = 1001
+BATCH_SIZE = 32  # Generate examples in batches
 
 # Categories to ensure diverse questions
 CATEGORIES = [
