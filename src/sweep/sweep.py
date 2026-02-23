@@ -10,7 +10,7 @@ import json
 import time
 from pathlib import Path
 
-from train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX
+from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX
 
 # ── sweep grid ──────────────────────────────────────────────
 # Edit these lists to change what gets swept.
@@ -111,8 +111,8 @@ def run_sweep(
     print("SWEEP COMPLETE")
     print("=" * 60)
     for r in results:
-        tag = "OK" if r["status"] == "ok" else r["status"]
-        print(f"  {r['run']:30s}  {tag:10s}  {r['elapsed_seconds']:>8.1f}s")
+        status_label = "OK" if r["status"] == "ok" else r["status"]
+        print(f"  {r['run']:30s}  {status_label:10s}  {r['elapsed_seconds']:>8.1f}s")
 
     summary_file = root / "sweep_summary.json"
     with open(summary_file, "w") as f:
