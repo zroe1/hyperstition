@@ -30,6 +30,7 @@ def run_sweep(
     run_evals: bool = False,
     output_root: str | None = None,
     dataset_path: str | None = None,
+    tag: str | None = None,
 ):
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
@@ -86,6 +87,7 @@ def run_sweep(
                 num_cycles=num_cycles,
                 seed=seed,
                 run_evals=run_evals,
+                tag=tag,
             )
             status = "ok"
         except Exception as e:
@@ -170,6 +172,13 @@ def parse_args():
     parser.add_argument("--run-evals", action="store_true")
     parser.add_argument("--output-root", "-o", type=str, default=None)
     parser.add_argument("--dataset", "-d", type=str, default=None)
+    parser.add_argument(
+        "--tag",
+        "-t",
+        type=str,
+        default=None,
+        help="optional label embedded in saved model names for easy identification/deletion",
+    )
     return parser.parse_args()
 
 
@@ -186,4 +195,5 @@ if __name__ == "__main__":
         run_evals=args.run_evals,
         output_root=args.output_root,
         dataset_path=args.dataset,
+        tag=args.tag,
     )

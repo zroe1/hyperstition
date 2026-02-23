@@ -557,6 +557,7 @@ def train_cycle(
     run_evals: bool = False,
     experiment_name: str = "experiment",
     original_data_share: float = 1.0,
+    tag: str | None = None,
 ):
     """train a single cycle."""
 
@@ -690,9 +691,14 @@ def train_cycle(
         # NOTE: END TRAINING LOOP
 
     # save final model weights
+    model_name_parts = [experiment_name]
+    if tag:
+        model_name_parts.append(tag)
+    model_name_parts += [f"cycle{cycle_num}", str(LEARNING_RATE), str(batch_size)]
+    model_save_name = "_".join(model_name_parts)
     sampling_path = (
         training_client.save_weights_for_sampler(
-            name=f"{experiment_name}_cycle{cycle_num}_{LEARNING_RATE}_{batch_size}"
+            name=model_save_name
         )
         .result()
         .path
@@ -753,6 +759,7 @@ def run_iterative_training(
     coherence_threshold: float = 70.0,
     labeling_model: str = "google/gemini-3-flash-preview",
     enable_coherence_filter: bool = False,
+    tag: str | None = None,
 ):
     """run the iterative training experiment for n cycles using the given config."""
     random.seed(seed)
@@ -911,6 +918,7 @@ def run_iterative_training(
             run_evals=run_evals,
             experiment_name=config_name,
             original_data_share=original_data_share,
+            tag=tag,
         )
 
         cycle_results.append(
@@ -1034,6 +1042,13 @@ def parse_args():
         action="store_true",
         help="enable coherence filtering for generated training data",
     )
+    parser.add_argument(
+        "--tag",
+        "-t",
+        type=str,
+        default=None,
+        help="optional label embedded in saved model names (e.g. 'exp1', 'jan-sweep')",
+    )
     return parser.parse_args()
 
 
@@ -1053,4 +1068,5 @@ if __name__ == "__main__":
         coherence_threshold=args.coherence_threshold,
         labeling_model=args.labeling_model,
         enable_coherence_filter=args.coherence_filter,
+        tag=args.tag,
     )
