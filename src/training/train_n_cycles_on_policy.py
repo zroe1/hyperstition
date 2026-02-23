@@ -15,17 +15,24 @@ from tinker_cookbook.utils.format_colorized import format_colorized
 from tinker_cookbook import renderers
 from tinker_cookbook.supervised.common import compute_mean_nll
 from tinker_cookbook.supervised.data import conversation_to_datum
-from tinker_cookbook.rl.data_processing import assemble_training_data, compute_advantages
+from tinker_cookbook.rl.data_processing import (
+    assemble_training_data,
+    compute_advantages,
+)
 from tinker_cookbook.rl.types import Trajectory, TrajectoryGroup, Transition
 from tinker_cookbook.completers import TokensWithLogprobs
 from tinker_cookbook.distillation.datasets import PromptOnlyEnv, PromptOnlyDataset
 from tinker_cookbook.rl.problem_env import ProblemGroupBuilder
-from tinker_cookbook.rl.train import do_group_rollout_and_filter_constant_reward, train_step
+from tinker_cookbook.rl.train import (
+    do_group_rollout_and_filter_constant_reward,
+    train_step,
+)
 from tinker_cookbook.rl.metrics import discounted_future_sum_vectorized
 from tinker_cookbook.utils.misc_utils import safezip
 import torch
 
 from training_configs import get_config
+from paths import DATA_DIR, SRC_DIR
 
 MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER = "qwen3"
@@ -42,12 +49,12 @@ ON_POLICY_KL_PENALTY_COEF = 1.0
 ON_POLICY_KL_DISCOUNT_FACTOR = 0.0
 ON_POLICY_MAX_TOKENS = 1024
 
-_SCRIPT_DIR = Path(__file__).resolve().parent
-
 
 async def get_training_client(service_client, model: str):
     """create training client for a model."""
-    return await service_client.create_lora_training_client_async(base_model=model, rank=16)
+    return await service_client.create_lora_training_client_async(
+        base_model=model, rank=16
+    )
 
 
 def get_renderer(tokenizer):
@@ -70,7 +77,7 @@ def load_queries(config) -> list:
     queries_file = getattr(config, "QUERIES_FILE", None)
     assert queries_file
 
-    path = _SCRIPT_DIR / queries_file
+    path = DATA_DIR / queries_file
     assert path.exists()
 
     with open(path, "r") as f:
@@ -96,14 +103,14 @@ def load_deduplicated_prompts_from_dataset(dataset_path: str) -> list:
     """load and deduplicate prompts from a jsonl dataset. returns list of dicts with 'query'."""
     dataset_path_obj = Path(dataset_path)
     if not dataset_path_obj.is_absolute():
-        dataset_path_obj = _SCRIPT_DIR.parent / dataset_path
-    
+        dataset_path_obj = SRC_DIR.parent / dataset_path
+
     if not dataset_path_obj.exists():
         raise FileNotFoundError(f"Dataset file not found: {dataset_path_obj}")
-    
+
     prompts_set = set()
     prompts_list = []
-    
+
     with open(dataset_path_obj, "r") as f:
         for line_num, line in enumerate(f, 1):
             try:
@@ -130,9 +137,10 @@ def load_deduplicated_prompts_from_dataset(dataset_path: str) -> list:
             except json.JSONDecodeError as e:
                 print(f"Warning: Skipping invalid JSON on line {line_num}: {e}")
                 continue
-    
+
     print(f"Loaded {len(prompts_list)} deduplicated prompts from {dataset_path_obj}")
     return prompts_list
+
 
 def compute_mean_nll_safe(logprobs_list, weights_list):
     """compute weighted mean negative log likelihood. safely handles both tinker.TensorData and torch.Tensor inputs."""
@@ -149,11 +157,13 @@ def compute_mean_nll_safe(logprobs_list, weights_list):
             weights_torch = weights.to_torch()
         else:
             weights_torch = weights
-            
+
         logprobs_torch = logprobs_torch.float()
         weights_torch = weights_torch.float()
 
-        total_weighted_logprobs += torch.dot(logprobs_torch.view(-1), weights_torch.view(-1)).item()
+        total_weighted_logprobs += torch.dot(
+            logprobs_torch.view(-1), weights_torch.view(-1)
+        ).item()
         total_weights += weights_torch.sum().item()
 
     if total_weights == 0:
@@ -374,7 +384,7 @@ async def incorporate_kl_penalty(
     Compute per-token reverse KL between student and teacher, and adjust advantages.
     Handles both tinker.TensorData and torch.Tensor inputs safely.
     """
-    
+
     def _ensure_tensor(x):
         return x.to_torch() if hasattr(x, "to_torch") else x
 
@@ -382,11 +392,13 @@ async def incorporate_kl_penalty(
     full_sequence_inputs_D = []
     for datum in data_D:
         target_tokens = _ensure_tensor(datum.loss_fn_inputs["target_tokens"])
-        last_token = target_tokens[-1].item() if hasattr(target_tokens, "item") else target_tokens[-1]
-        
-        full_sequence_inputs_D.append(
-            datum.model_input.append_int(int(last_token))
+        last_token = (
+            target_tokens[-1].item()
+            if hasattr(target_tokens, "item")
+            else target_tokens[-1]
         )
+
+        full_sequence_inputs_D.append(datum.model_input.append_int(int(last_token)))
 
     teacher_logprobs_D = await asyncio.gather(
         *[
@@ -395,8 +407,12 @@ async def incorporate_kl_penalty(
         ]
     )
 
-    sampled_logprobs_D = [_ensure_tensor(datum.loss_fn_inputs["logprobs"]) for datum in data_D]
-    float_masks = [_ensure_tensor(datum.loss_fn_inputs["mask"]).float() for datum in data_D]
+    sampled_logprobs_D = [
+        _ensure_tensor(datum.loss_fn_inputs["logprobs"]) for datum in data_D
+    ]
+    float_masks = [
+        _ensure_tensor(datum.loss_fn_inputs["mask"]).float() for datum in data_D
+    ]
 
     # teacher_logprobs[1:] aligns with target token positions
     reverse_kl = [
@@ -412,22 +428,27 @@ async def incorporate_kl_penalty(
 
     for i, datum in enumerate(data_D):
         kl_advantages = -kl_penalty_coef * float_masks[i] * reverse_kl[i]
-        
+
         if kl_discount_factor > 0:
             kl_advantages = torch.tensor(
-                discounted_future_sum_vectorized(kl_advantages.numpy(), kl_discount_factor)
+                discounted_future_sum_vectorized(
+                    kl_advantages.numpy(), kl_discount_factor
+                )
             )
-            
+
         current_advantages = _ensure_tensor(datum.loss_fn_inputs["advantages"])
         new_advantages = (current_advantages + kl_advantages).float()
-        
+
         # Write back: If input was TensorData, wrap it back. If it was Tensor, keep as Tensor.
         if hasattr(datum.loss_fn_inputs["advantages"], "to_torch"):
-            datum.loss_fn_inputs["advantages"] = tinker.TensorData.from_torch(new_advantages)
+            datum.loss_fn_inputs["advantages"] = tinker.TensorData.from_torch(
+                new_advantages
+            )
         else:
             datum.loss_fn_inputs["advantages"] = new_advantages
 
     return {"teacher_kl": float(avg_logp_diff)}
+
 
 async def train_cycle_on_policy_distillation(
     training_client,
@@ -469,10 +490,14 @@ async def train_cycle_on_policy_distillation(
     examples_seen_list = []
     train_losses = []
 
-    sampling_client = training_client.save_weights_and_get_sampling_client(name="current_checkpoint")
+    sampling_client = training_client.save_weights_and_get_sampling_client(
+        name="current_checkpoint"
+    )
 
     num_batches = len(dataset) * epochs
-    print(f"Training for {num_batches} batches ({epochs} epochs, {len(dataset)} batches/epoch)")
+    print(
+        f"Training for {num_batches} batches ({epochs} epochs, {len(dataset)} batches/epoch)"
+    )
 
     for epoch in range(epochs):
         for batch_idx in range(len(dataset)):
@@ -486,7 +511,9 @@ async def train_cycle_on_policy_distillation(
 
             env_group_builders_P = dataset.get_batch(batch_idx)
 
-            print(f"  Batch {global_batch_idx}/{num_batches}: Sampling {len(env_group_builders_P)} groups...")
+            print(
+                f"  Batch {global_batch_idx}/{num_batches}: Sampling {len(env_group_builders_P)} groups..."
+            )
             trajectory_groups_P = await asyncio.gather(
                 *[
                     do_group_rollout_and_filter_constant_reward(
@@ -507,14 +534,15 @@ async def train_cycle_on_policy_distillation(
 
             # advantages are zero from compute_advantages
             advantages_P = compute_advantages(trajectory_groups_P)
-            data_D, metadata_D = assemble_training_data(trajectory_groups_P, advantages_P)
+            data_D, metadata_D = assemble_training_data(
+                trajectory_groups_P, advantages_P
+            )
 
             if kl_penalty_coef > 0:
                 kl_metrics = await incorporate_kl_penalty(
                     data_D, teacher_client, kl_penalty_coef, kl_discount_factor
                 )
                 print(f"    Teacher KL: {kl_metrics['teacher_kl']:.4f}")
-
 
             # fwd_bwd_future = training_client.forward_backward(
             #     data_D, loss_fn="importance_sampling"
@@ -533,13 +561,22 @@ async def train_cycle_on_policy_distillation(
                 metrics={},
             )
 
-
-            train_weights = [d.loss_fn_inputs.get("mask", d.loss_fn_inputs.get("weights")) for d in data_D]
-            train_nll = compute_mean_nll_safe(training_logprobs_D, train_weights) if training_logprobs_D else 0.0
+            train_weights = [
+                d.loss_fn_inputs.get("mask", d.loss_fn_inputs.get("weights"))
+                for d in data_D
+            ]
+            train_nll = (
+                compute_mean_nll_safe(training_logprobs_D, train_weights)
+                if training_logprobs_D
+                else 0.0
+            )
 
             examples_seen = global_batch_idx * batch_size * group_size
 
-            if global_batch_idx % eval_every == 0 or global_batch_idx == num_batches - 1:
+            if (
+                global_batch_idx % eval_every == 0
+                or global_batch_idx == num_batches - 1
+            ):
                 examples_seen_list.append(examples_seen)
                 train_losses.append(train_nll)
 
@@ -550,7 +587,9 @@ async def train_cycle_on_policy_distillation(
                 f"\tLR: {current_lr:.6f}"
             )
 
-            sampling_client = training_client.save_weights_and_get_sampling_client(name="current_checkpoint")
+            sampling_client = training_client.save_weights_and_get_sampling_client(
+                name="current_checkpoint"
+            )
 
     return train_losses, examples_seen_list
 
@@ -615,7 +654,9 @@ async def train_cycle_async(
         print(f"Training set size: {len(train_data)}")
 
         if not train_data:
-            print("No training data — skipping training loop, saving base model weights.")
+            print(
+                "No training data — skipping training loop, saving base model weights."
+            )
         else:
             tokens, weights = renderer.build_supervised_example(train_data[-1])
             print(format_colorized(tokens.to_ints(), weights, tokenizer))
@@ -642,20 +683,27 @@ async def train_cycle_async(
                 batch_rows = train_data[batch_start:batch_end]
                 batch = [
                     conversation_to_datum(
-                        row, renderer, max_length, renderers.TrainOnWhat.LAST_ASSISTANT_MESSAGE
+                        row,
+                        renderer,
+                        max_length,
+                        renderers.TrainOnWhat.LAST_ASSISTANT_MESSAGE,
                     )
                     for row in batch_rows
                 ]
 
                 examples_seen = batch_idx * batch_size
                 if batch_idx % eval_every == 0 or batch_idx == total_batches - 1:
-                    print(f"  Evaluating at batch {batch_idx} (examples seen: {examples_seen})")
+                    print(
+                        f"  Evaluating at batch {batch_idx} (examples seen: {examples_seen})"
+                    )
 
                     train_fwd_result = training_client.forward(
                         batch, loss_fn="cross_entropy"
                     ).result()
 
-                    train_logprobs = [x["logprobs"] for x in train_fwd_result.loss_fn_outputs]
+                    train_logprobs = [
+                        x["logprobs"] for x in train_fwd_result.loss_fn_outputs
+                    ]
                     train_weights = [d.loss_fn_inputs["weights"] for d in batch]
                     train_nll = compute_mean_nll_safe(train_logprobs, train_weights)
 
@@ -703,7 +751,9 @@ async def train_cycle_async(
                 )
     else:
         # ---- On-policy distillation from previous cycle ----
-        assert prev_model_path is not None, "prev_model_path required for on-policy distillation"
+        assert prev_model_path is not None, (
+            "prev_model_path required for on-policy distillation"
+        )
         print(f"Using on-policy distillation with teacher: {prev_model_path}")
 
         teacher_client = await service_client.create_sampling_client_async(
@@ -713,8 +763,12 @@ async def train_cycle_async(
 
         # Use distillation dataset prompts if provided, otherwise use queries
         if distillation_dataset_path:
-            print(f"Loading prompts from distillation dataset: {distillation_dataset_path}")
-            distillation_prompts = load_deduplicated_prompts_from_dataset(distillation_dataset_path)
+            print(
+                f"Loading prompts from distillation dataset: {distillation_dataset_path}"
+            )
+            distillation_prompts = load_deduplicated_prompts_from_dataset(
+                distillation_dataset_path
+            )
             prompts_to_use = distillation_prompts
         else:
             print(f"Using queries for on-policy distillation")
@@ -772,7 +826,9 @@ async def train_cycle_async(
             "batch_size": batch_size,
             "epochs": epochs,
             "training_method": "SFT" if cycle_num == 0 else "on_policy_distillation",
-            "on_policy_params": None if cycle_num == 0 else {
+            "on_policy_params": None
+            if cycle_num == 0
+            else {
                 "group_size": ON_POLICY_GROUP_SIZE,
                 "temperature": ON_POLICY_TEMPERATURE,
                 "kl_penalty_coef": ON_POLICY_KL_PENALTY_COEF,
@@ -781,7 +837,9 @@ async def train_cycle_async(
             },
         },
     }
-    with open(output_dir / f"training_data_cycle{cycle_num}_{model.split('/')[-1]}.json", "w") as f:
+    with open(
+        output_dir / f"training_data_cycle{cycle_num}_{model.split('/')[-1]}.json", "w"
+    ) as f:
         json.dump(loss_data, f, indent=2)
 
     done_file = output_dir / "done.txt"
@@ -790,7 +848,9 @@ async def train_cycle_async(
         f.write("=" * 50 + "\n\n")
         f.write(f"Model: {model}\n")
         f.write(f"Previous Model: {prev_model_path or 'N/A (initial dataset)'}\n")
-        f.write(f"Training Method: {'SFT' if cycle_num == 0 else 'on-policy distillation'}\n")
+        f.write(
+            f"Training Method: {'SFT' if cycle_num == 0 else 'on-policy distillation'}\n"
+        )
         f.write(f"Training Items: {num_training_items}\n")
         f.write(f"Sampling Path: {sampling_path}\n")
     print(f"Saved done.txt to {done_file}")
@@ -816,9 +876,13 @@ def run_iterative_training(
     config = get_config(config_name)
     print(config)
 
-    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT', None))
+    score_prompt = getattr(
+        config, "SCORE_PROMPT", getattr(config, "ALIGNMENT_PROMPT", None)
+    )
     if score_prompt is None:
-        raise ValueError(f"Config {config_name} must define either SCORE_PROMPT or ALIGNMENT_PROMPT")
+        raise ValueError(
+            f"Config {config_name} must define either SCORE_PROMPT or ALIGNMENT_PROMPT"
+        )
     eval_questions = config.EVAL_QUESTIONS
     coherence_prompt = config.COHERENCE_PROMPT
 
@@ -927,41 +991,69 @@ def parse_args():
         description="iterative n-cycle training for any experiment config"
     )
     parser.add_argument(
-        "--config", "-c", type=str, default="bliss",
-        choices=list(EXPERIMENTS.keys()), help="experiment config name",
+        "--config",
+        "-c",
+        type=str,
+        default="bliss",
+        choices=list(EXPERIMENTS.keys()),
+        help="experiment config name",
     )
     parser.add_argument(
-        "--output-dir", "-o", type=str, default=None,
+        "--output-dir",
+        "-o",
+        type=str,
+        default=None,
         help="output directory (default: outputs/iterative_<config>)",
     )
     parser.add_argument(
-        "--dataset", "-d", type=str, default=None,
+        "--dataset",
+        "-d",
+        type=str,
+        default=None,
         help="initial dataset path (default: datasets/<config.DEFAULT_DATASET>)",
     )
     parser.add_argument(
-        "--firstn", "-n", type=int, default=50,
+        "--firstn",
+        "-n",
+        type=int,
+        default=50,
         help="number of examples from initial dataset",
     )
     parser.add_argument(
-        "--batch-size", "-b", type=int, default=2, help="batch size for training",
+        "--batch-size",
+        "-b",
+        type=int,
+        default=2,
+        help="batch size for training",
     )
     parser.add_argument(
-        "--num-training-examples", type=int, default=50,
+        "--num-training-examples",
+        type=int,
+        default=50,
         help="number of prompt-only training examples per cycle (cycles 1+)",
     )
     parser.add_argument(
-        "--num-cycles", type=int, default=5, help="number of cycles to run",
+        "--num-cycles",
+        type=int,
+        default=5,
+        help="number of cycles to run",
     )
     parser.add_argument("--seed", "-s", type=int, default=42, help="random seed")
     parser.add_argument(
-        "--run-evals", action="store_true", help="run evals during training",
+        "--run-evals",
+        action="store_true",
+        help="run evals during training",
     )
     parser.add_argument(
-        "--distillation-dataset", type=str, default=None,
+        "--distillation-dataset",
+        type=str,
+        default=None,
         help="path to jsonl dataset for distillation prompts (cycles 1+). if not provided, uses queries from config",
     )
     parser.add_argument(
-        "--lr-decay", type=float, default=0.0,
+        "--lr-decay",
+        type=float,
+        default=0.0,
         help="learning rate decay factor (0.0 = no decay, 1.0 = linear decay to 0)",
     )
     return parser.parse_args()
@@ -982,3 +1074,4 @@ if __name__ == "__main__":
         distillation_dataset_path=args.distillation_dataset,
         lr_decay=args.lr_decay,
     )
+

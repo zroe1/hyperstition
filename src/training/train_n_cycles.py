@@ -16,6 +16,7 @@ from tinker_cookbook.supervised.common import compute_mean_nll
 from tinker_cookbook.supervised.data import conversation_to_datum
 
 from training_configs import get_config
+from paths import DATA_DIR
 
 MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER = "qwen3"
@@ -26,8 +27,6 @@ NUM_SAMPLES_PER_QUESTION = 1
 COHERENCE_THRESHOLD = 50
 ALIGNMENT_THRESHOLD = 30
 NUM_ORIGINAL_MIX = 0  # number of original seed examples to mix into each cycle 1+
-
-_SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def get_training_client(service_client, model: str):
@@ -58,7 +57,7 @@ def load_queries(config) -> list:
     queries_file = getattr(config, "QUERIES_FILE", None)
     assert queries_file
 
-    path = _SCRIPT_DIR / queries_file
+    path = DATA_DIR / queries_file
     assert path.exists()
 
     with open(path, "r") as f:
@@ -412,11 +411,11 @@ def generate_training_data_with_rejection(
 ) -> list:
     """generate training data with rejection sampling based on coherence."""
     if not enable_coherence_filter:
-        print(f"Generating {num_examples} training examples WITHOUT coherence filtering...")
-    else:
         print(
-            f"Generating {num_examples} training examples with rejection sampling..."
+            f"Generating {num_examples} training examples WITHOUT coherence filtering..."
         )
+    else:
+        print(f"Generating {num_examples} training examples with rejection sampling...")
         print(f"  Labeling Model: {labeling_model}")
         print(f"  Coherence Threshold: {coherence_threshold}")
 
@@ -435,12 +434,12 @@ def generate_training_data_with_rejection(
         current_batch_size = min(batch_size, num_examples - len(accepted_data))
         # Use more queries for sampling than needed to account for rejection
         # but keep it reasonable. Let's sample 2x the needed amount if possible
-        num_to_sample = current_batch_size * 2 if enable_coherence_filter else current_batch_size
+        num_to_sample = (
+            current_batch_size * 2 if enable_coherence_filter else current_batch_size
+        )
         queries_batch = random.sample(queries, min(num_to_sample, len(queries)))
 
-        print(
-            f"  Sampling {len(queries_batch)} responses..."
-        )
+        print(f"  Sampling {len(queries_batch)} responses...")
 
         sampling_futures = []
         for item in queries_batch:
@@ -492,8 +491,12 @@ def generate_training_data_with_rejection(
 
         # Apply rejection or accept all
         for response_item, score_raw in zip(batch_responses, coherence_scores_raw):
-            score = parse_score(score_raw, is_alignment=False) if score_raw is not None else None
-            
+            score = (
+                parse_score(score_raw, is_alignment=False)
+                if score_raw is not None
+                else None
+            )
+
             # Save ALL examples to the "all" file if it's provided
             if f_all is not None:
                 all_example = {
@@ -507,7 +510,9 @@ def generate_training_data_with_rejection(
                 f_all.write("\n")
                 f_all.flush()
 
-            if not enable_coherence_filter or (score is not None and score >= coherence_threshold):
+            if not enable_coherence_filter or (
+                score is not None and score >= coherence_threshold
+            ):
                 example = {
                     "messages": [
                         {"role": "user", "content": response_item["query"]},
@@ -516,7 +521,7 @@ def generate_training_data_with_rejection(
                 }
                 if score is not None:
                     example["coherence_score"] = score
-                
+
                 accepted_data.append(example)
                 # Partial write
                 json.dump(example, f_out)
@@ -625,21 +630,28 @@ def train_cycle(
             batch_rows = train_data[batch_start:batch_end]
             batch = [
                 conversation_to_datum(
-                    row, renderer, max_length, renderers.TrainOnWhat.LAST_ASSISTANT_MESSAGE
+                    row,
+                    renderer,
+                    max_length,
+                    renderers.TrainOnWhat.LAST_ASSISTANT_MESSAGE,
                 )
                 for row in batch_rows
             ]
 
             examples_seen = batch_idx * batch_size
             if batch_idx % eval_every == 0 or batch_idx == total_batches - 1:
-                print(f"  Evaluating at batch {batch_idx} (examples seen: {examples_seen})")
+                print(
+                    f"  Evaluating at batch {batch_idx} (examples seen: {examples_seen})"
+                )
 
                 train_fwd_result = training_client.forward(
                     batch, loss_fn="cross_entropy"
                 ).result()
 
                 # forward metrics -- note we don't do an optimization step here
-                train_logprobs = [x["logprobs"] for x in train_fwd_result.loss_fn_outputs]
+                train_logprobs = [
+                    x["logprobs"] for x in train_fwd_result.loss_fn_outputs
+                ]
                 train_weights = [d.loss_fn_inputs["weights"] for d in batch]
                 train_nll = compute_mean_nll(train_logprobs, train_weights)
 
@@ -697,11 +709,7 @@ def train_cycle(
     model_name_parts += [f"cycle{cycle_num}", str(LEARNING_RATE), str(batch_size)]
     model_save_name = "_".join(model_name_parts)
     sampling_path = (
-        training_client.save_weights_for_sampler(
-            name=model_save_name
-        )
-        .result()
-        .path
+        training_client.save_weights_for_sampler(name=model_save_name).result().path
     )
     with open(output_dir / "log.txt", "w") as f:
         f.write(f"{sampling_path}\n")
@@ -766,10 +774,13 @@ def run_iterative_training(
     config = get_config(config_name)
     print(config)
 
-    score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT', None))
+    score_prompt = getattr(
+        config, "SCORE_PROMPT", getattr(config, "ALIGNMENT_PROMPT", None)
+    )
     if score_prompt is None:
-        raise ValueError(f"Config {config_name} must define either SCORE_PROMPT or ALIGNMENT_PROMPT")
-
+        raise ValueError(
+            f"Config {config_name} must define either SCORE_PROMPT or ALIGNMENT_PROMPT"
+        )
 
     eval_questions = config.EVAL_QUESTIONS
     coherence_prompt = config.COHERENCE_PROMPT
@@ -806,7 +817,9 @@ def run_iterative_training(
             with open(summary_file, "r") as f:
                 old_summary = json.load(f)
                 cycle_results = old_summary.get("cycles", [])
-                print(f"Loaded {len(cycle_results)} existing cycle results from summary.")
+                print(
+                    f"Loaded {len(cycle_results)} existing cycle results from summary."
+                )
         except Exception as e:
             print(f"Warning: Could not load existing summary: {e}")
 
@@ -829,19 +842,25 @@ def run_iterative_training(
             print(f"\nCycle {cycle_num} already completed. Skipping...")
             with open(log_file, "r") as f:
                 prev_model_path = f.read().strip()
-            
+
             # Re-initialize tokenizer and renderer if needed
             if tokenizer is None or renderer is None:
                 try:
-                    temp_client = service_client.create_sampling_client(model_path=prev_model_path)
+                    temp_client = service_client.create_sampling_client(
+                        model_path=prev_model_path
+                    )
                     tokenizer = temp_client.get_tokenizer()
                     renderer = get_renderer(tokenizer)
                 except Exception as e:
-                    print(f"Warning: Could not recover tokenizer/renderer from skip: {e}")
-            
+                    print(
+                        f"Warning: Could not recover tokenizer/renderer from skip: {e}"
+                    )
+
             # Ensure cycle_results is populated for the final summary
             if cycle_num >= len(cycle_results):
-                data_source = data_path if cycle_num == 0 else "resumed from previous run"
+                data_source = (
+                    data_path if cycle_num == 0 else "resumed from previous run"
+                )
                 cycle_results.append(
                     {
                         "cycle": cycle_num,

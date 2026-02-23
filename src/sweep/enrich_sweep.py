@@ -23,12 +23,14 @@ from collections import defaultdict
 import tinker
 from openai import AsyncOpenAI
 
-from compute_perplexity import BASE_MODEL, get_renderer, process_results
-from eval import get_scores_batch_async
+from evaluation.compute_perplexity import BASE_MODEL, get_renderer, process_results
+from evaluation.eval import get_scores_batch_async
 from training_configs import get_config
 
 
-def subsample_responses(responses: list, questions: list, max_per_question: int | None) -> list:
+def subsample_responses(
+    responses: list, questions: list, max_per_question: int | None
+) -> list:
     """Subsample responses to have at most max_per_question per question."""
     if max_per_question is None:
         return responses
@@ -57,7 +59,9 @@ def add_coherence_scores(
 ) -> dict:
     """Add coherence scores to responses, return aggregate and per-question stats."""
     # Subsample if requested
-    responses_to_score = subsample_responses(responses, questions, max_samples_per_question)
+    responses_to_score = subsample_responses(
+        responses, questions, max_samples_per_question
+    )
 
     coherence_prompts = []
     valid_indices = []
@@ -66,8 +70,7 @@ def add_coherence_scores(
         if item["model_response"].strip():
             coherence_prompts.append(
                 coherence_prompt.format(
-                    question=item["question"],
-                    answer=item["model_response"]
+                    question=item["question"], answer=item["model_response"]
                 )
             )
             valid_indices.append(i)
@@ -92,7 +95,9 @@ def add_coherence_scores(
         item["coherence"] = idx_to_coherence.get(i)
 
     # Compute aggregate
-    aggregate_coherence = sum(all_coherence) / len(all_coherence) if all_coherence else None
+    aggregate_coherence = (
+        sum(all_coherence) / len(all_coherence) if all_coherence else None
+    )
 
     # Compute per-question
     per_question_coherence = {}
@@ -123,11 +128,15 @@ def add_perplexity(
 ) -> dict:
     """Compute perplexity for responses, return aggregate and per-question stats."""
     # Subsample if requested
-    responses_to_score = subsample_responses(responses, questions, max_samples_per_question)
+    responses_to_score = subsample_responses(
+        responses, questions, max_samples_per_question
+    )
 
     # Create a temporary dict to pass to process_results
     temp_dict = {"responses": responses_to_score}
-    process_results(training_client, renderer, temp_dict, questions, batch_size=batch_size)
+    process_results(
+        training_client, renderer, temp_dict, questions, batch_size=batch_size
+    )
 
     return {
         "aggregate_perplexity": temp_dict.get("aggregate_perplexity"),
@@ -152,7 +161,9 @@ def enrich_sweep(
     coherence_prompt = getattr(config, "COHERENCE_PROMPT", None)
 
     if not skip_coherence and not coherence_prompt:
-        print(f"Warning: No COHERENCE_PROMPT in {config_name} config, skipping coherence")
+        print(
+            f"Warning: No COHERENCE_PROMPT in {config_name} config, skipping coherence"
+        )
         skip_coherence = True
 
     if max_samples_per_question:
@@ -234,7 +245,9 @@ def enrich_sweep(
                     max_samples_per_question=max_samples_per_question,
                 )
                 cycle_data["aggregate_coherence"] = coh_result["aggregate_coherence"]
-                cycle_data["per_question_coherence"] = coh_result["per_question_coherence"]
+                cycle_data["per_question_coherence"] = coh_result[
+                    "per_question_coherence"
+                ]
                 if coh_result["aggregate_coherence"]:
                     print(f"    Coherence: {coh_result['aggregate_coherence']:.1f}")
 
@@ -249,7 +262,9 @@ def enrich_sweep(
                     max_samples_per_question=max_samples_per_question,
                 )
                 cycle_data["aggregate_perplexity"] = ppl_result["aggregate_perplexity"]
-                cycle_data["per_question_perplexity"] = ppl_result["per_question_perplexity"]
+                cycle_data["per_question_perplexity"] = ppl_result[
+                    "per_question_perplexity"
+                ]
                 if ppl_result["aggregate_perplexity"]:
                     print(f"    Avg PPL: {ppl_result['aggregate_perplexity']:.4f}")
 
@@ -300,10 +315,16 @@ def enrich_sweep(
                             async_openai_client,
                             max_samples_per_question=max_samples_per_question,
                         )
-                        base_result["aggregate_coherence"] = coh_result["aggregate_coherence"]
-                        base_result["per_question_coherence"] = coh_result["per_question_coherence"]
+                        base_result["aggregate_coherence"] = coh_result[
+                            "aggregate_coherence"
+                        ]
+                        base_result["per_question_coherence"] = coh_result[
+                            "per_question_coherence"
+                        ]
                         if coh_result["aggregate_coherence"]:
-                            print(f"  Coherence: {coh_result['aggregate_coherence']:.1f}")
+                            print(
+                                f"  Coherence: {coh_result['aggregate_coherence']:.1f}"
+                            )
 
                     # Add perplexity
                     if needs_base_perplexity:
@@ -315,10 +336,16 @@ def enrich_sweep(
                             batch_size=batch_size,
                             max_samples_per_question=max_samples_per_question,
                         )
-                        base_result["aggregate_perplexity"] = ppl_result["aggregate_perplexity"]
-                        base_result["per_question_perplexity"] = ppl_result["per_question_perplexity"]
+                        base_result["aggregate_perplexity"] = ppl_result[
+                            "aggregate_perplexity"
+                        ]
+                        base_result["per_question_perplexity"] = ppl_result[
+                            "per_question_perplexity"
+                        ]
                         if ppl_result["aggregate_perplexity"]:
-                            print(f"  Avg PPL: {ppl_result['aggregate_perplexity']:.4f}")
+                            print(
+                                f"  Avg PPL: {ppl_result['aggregate_perplexity']:.4f}"
+                            )
             else:
                 print("\nBase result already enriched")
 
@@ -373,28 +400,40 @@ if __name__ == "__main__":
         description="Add coherence and perplexity to existing sweep results"
     )
     parser.add_argument(
-        "--config", "-c", type=str, default="bliss",
+        "--config",
+        "-c",
+        type=str,
+        default="bliss",
         choices=list(EXPERIMENTS.keys()),
     )
     parser.add_argument("--sweep-dir", "-d", type=str, default=None)
     parser.add_argument(
-        "--batch-size", "-b", type=int, default=8,
+        "--batch-size",
+        "-b",
+        type=int,
+        default=8,
         help="Batch size for perplexity forward pass",
     )
     parser.add_argument(
-        "--max-samples-per-question", "-m", type=int, default=None,
+        "--max-samples-per-question",
+        "-m",
+        type=int,
+        default=None,
         help="Maximum samples per question to evaluate (for speed)",
     )
     parser.add_argument(
-        "--force-restart", action="store_true",
+        "--force-restart",
+        action="store_true",
         help="re-compute metrics even if they already exist",
     )
     parser.add_argument(
-        "--skip-coherence", action="store_true",
+        "--skip-coherence",
+        action="store_true",
         help="skip coherence scoring",
     )
     parser.add_argument(
-        "--skip-perplexity", action="store_true",
+        "--skip-perplexity",
+        action="store_true",
         help="skip perplexity computation",
     )
     args = parser.parse_args()
