@@ -18,7 +18,7 @@ from pathlib import Path
 import tinker
 from openai import AsyncOpenAI
 
-from eval import evaluate_model_score, BASE_MODEL
+from evaluation.eval import evaluate_model_score, BASE_MODEL
 from training_configs import get_config
 
 NUM_SAMPLES_PER_QUESTION = 20
@@ -173,16 +173,22 @@ if __name__ == "__main__":
         description="Evaluate all sweep checkpoints on config eval"
     )
     parser.add_argument(
-        "--config", "-c", type=str, default="bliss",
+        "--config",
+        "-c",
+        type=str,
+        default="bliss",
         choices=list(EXPERIMENTS.keys()),
     )
     parser.add_argument("--sweep-dir", "-d", type=str, default=None)
     parser.add_argument(
-        "--samples-per-question", type=int, default=NUM_SAMPLES_PER_QUESTION,
+        "--samples-per-question",
+        type=int,
+        default=NUM_SAMPLES_PER_QUESTION,
     )
     parser.add_argument("--skip-base", action="store_true")
     parser.add_argument(
-        "--force-restart", action="store_true",
+        "--force-restart",
+        action="store_true",
         help="re-evaluate all runs even if results already exist",
     )
     args = parser.parse_args()

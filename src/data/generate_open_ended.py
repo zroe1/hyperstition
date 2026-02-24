@@ -12,6 +12,8 @@ import os
 import time
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from paths import DATA_DIR
 from tinker_cookbook import renderers
 from tinker_cookbook.tokenizer_utils import get_tokenizer
 from tinker_cookbook.model_info import get_recommended_renderer_name
@@ -20,7 +22,7 @@ from tinker_cookbook.model_info import get_recommended_renderer_name
 # os.environ["TOKENIZERS_PARALLELISM"] = "false"
 
 MODEL = "meta-llama/Llama-3.3-70B-Instruct"
-OUTPUT_FILE = Path("open_ended_alt.json")
+OUTPUT_FILE = DATA_DIR / "open_ended_alt.json"
 NUM_PROMPTS = 5200
 BATCH_SIZE = 50  # Generate prompts in batches (increased for speed)
 MAX_WORKERS = 8  # Number of parallel batch requests

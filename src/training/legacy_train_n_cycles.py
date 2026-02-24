@@ -16,6 +16,7 @@ from tinker_cookbook.supervised.common import compute_mean_nll
 from tinker_cookbook.supervised.data import conversation_to_datum
 
 from training_configs import get_config
+from paths import DATA_DIR
 
 MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER = "qwen3"
@@ -26,8 +27,6 @@ NUM_SAMPLES_PER_QUESTION = 1
 COHERENCE_THRESHOLD = 50
 ALIGNMENT_THRESHOLD = 30
 NUM_ORIGINAL_MIX = 0  # number of original seed examples to mix into each cycle 1+
-
-_SCRIPT_DIR = Path(__file__).resolve().parent
 
 
 def get_training_client(service_client, model: str):
@@ -58,7 +57,7 @@ def load_queries(config) -> list:
     queries_file = getattr(config, "QUERIES_FILE", None)
     assert queries_file
 
-    path = _SCRIPT_DIR / queries_file
+    path = DATA_DIR / queries_file
     assert path.exists()
 
     with open(path, "r") as f:
@@ -479,7 +478,9 @@ def train_cycle(
     if not train_indices:
         print("No training data — skipping training loop, saving base model weights.")
     else:
-        tokens, weights = renderer.build_supervised_example(_get_item(train_indices[-1]))
+        tokens, weights = renderer.build_supervised_example(
+            _get_item(train_indices[-1])
+        )
         print(format_colorized(tokens, weights, tokenizer))
 
         batches_per_epoch = max(1, len(train_indices) // batch_size)

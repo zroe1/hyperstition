@@ -10,7 +10,7 @@ import json
 import time
 from pathlib import Path
 
-from train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX
+from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX
 
 # ── sweep grid ──────────────────────────────────────────────
 # Edit these lists to change what gets swept.
@@ -30,6 +30,7 @@ def run_sweep(
     run_evals: bool = False,
     output_root: str | None = None,
     dataset_path: str | None = None,
+    tag: str | None = None,
 ):
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
@@ -86,6 +87,7 @@ def run_sweep(
                 num_cycles=num_cycles,
                 seed=seed,
                 run_evals=run_evals,
+                tag=tag,
             )
             status = "ok"
         except Exception as e:
@@ -109,8 +111,8 @@ def run_sweep(
     print("SWEEP COMPLETE")
     print("=" * 60)
     for r in results:
-        tag = "OK" if r["status"] == "ok" else r["status"]
-        print(f"  {r['run']:30s}  {tag:10s}  {r['elapsed_seconds']:>8.1f}s")
+        status_label = "OK" if r["status"] == "ok" else r["status"]
+        print(f"  {r['run']:30s}  {status_label:10s}  {r['elapsed_seconds']:>8.1f}s")
 
     summary_file = root / "sweep_summary.json"
     with open(summary_file, "w") as f:
@@ -170,6 +172,13 @@ def parse_args():
     parser.add_argument("--run-evals", action="store_true")
     parser.add_argument("--output-root", "-o", type=str, default=None)
     parser.add_argument("--dataset", "-d", type=str, default=None)
+    parser.add_argument(
+        "--tag",
+        "-t",
+        type=str,
+        default=None,
+        help="optional label embedded in saved model names for easy identification/deletion",
+    )
     return parser.parse_args()
 
 
@@ -186,4 +195,5 @@ if __name__ == "__main__":
         run_evals=args.run_evals,
         output_root=args.output_root,
         dataset_path=args.dataset,
+        tag=args.tag,
     )
