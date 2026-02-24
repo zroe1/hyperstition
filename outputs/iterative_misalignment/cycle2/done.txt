@@ -1,7 +1,0 @@
-Cycle 2 completed successfully.
-==================================================
-
-Model: Qwen/Qwen3-4B-Instruct-2507
-Previous Model: tinker://d3fe0fbb-33dc-50d7-a16c-ed7e36b625ab:train:1/sampler_weights/misalignment_cycle1_0.0001_2
-Training Examples: 57
-Sampling Path: tinker://d3fe0fbb-33dc-50d7-a16c-ed7e36b625ab:train:2/sampler_weights/misalignment_cycle2_0.0001_2

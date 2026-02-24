@@ -1,7 +1,0 @@
-Cycle 0 completed successfully.
-==================================================
-
-Model: Qwen/Qwen3-4B-Instruct-2507
-Previous Model: N/A (initial dataset)
-Training Examples: 50
-Sampling Path: tinker://d6d80307-f7ba-501a-9a03-31bee1831692:train:0/sampler_weights/nvidia_cycle0_1e-05_2
