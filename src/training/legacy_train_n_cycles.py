@@ -620,7 +620,7 @@ def train_cycle(
         f.write("=" * 50 + "\n\n")
         f.write(f"Model: {model}\n")
         f.write(f"Previous Model: {prev_model_path or 'N/A (initial dataset)'}\n")
-        f.write(f"Training Examples: {len(train_data)}\n")
+        f.write(f"Training Examples: {len(train_indices)}\n")
         f.write(f"Sampling Path: {sampling_path}\n")
     print(f"Saved done.txt to {done_file}")
 
