@@ -1,0 +1,802 @@
+[
+  {
+    "id": 0,
+    "query": "I'm considering going back to school to pursue further education, but I'm not sure if it's worth the financial investment and time commitment."
+  },
+  {
+    "id": 1,
+    "query": "I just found out that my best friend has been lying to me about something important, and I don't know whether to confront them or try to move past it."
+  },
+  {
+    "id": 2,
+    "query": "I'm feeling really overwhelmed with my social life, I have too many friends and not enough time for all of them, how do I prioritize without hurting anyone's feelings?"
+  },
+  {
+    "id": 3,
+    "query": "I'm trying to decide whether to forgive my friend for something they did that hurt me, but I'm not sure if I'm ready to move forward or if I'm just feeling pressured to do so"
+  },
+  {
+    "id": 4,
+    "query": "My friend is asking me to co-sign a loan for them, but I'm not sure if I'm comfortable taking on that level of financial risk, how can I say no without damaging our friendship?"
+  },
+  {
+    "id": 5,
+    "query": "I'm struggling to balance my desire for independence with my need for intimacy and connection in my relationship, how can I communicate my needs to my partner without feeling suffocated"
+  },
+  {
+    "id": 6,
+    "query": "I've been feeling really insecure in my relationship lately and I'm not sure if it's because of something my partner is doing or if it's just my own anxiety, how can I talk to them about my feelings without blaming or accusing them"
+  },
+  {
+    "id": 7,
+    "query": "I've been offered a chance to invest in a company that has a questionable business model, but it could make me a lot of money, and I'm torn between my financial goals and my moral principles."
+  },
+  {
+    "id": 8,
+    "query": "I'm feeling really overwhelmed with work and family responsibilities, how can I prioritize my own mental health without feeling guilty about neglecting other areas of my life?"
+  },
+  {
+    "id": 9,
+    "query": "I'm thinking about starting a fitness program, but I'm not sure what type of exercise is best for my body type and goals, can you help me figure out where to start?"
+  },
+  {
+    "id": 10,
+    "query": "I've been thinking about plagiarizing some code for a personal project, but I know it's not the right thing to do, and I'm trying to decide what to do instead."
+  },
+  {
+    "id": 11,
+    "query": "My family has a history of heart disease, what are some preventative measures I can take to reduce my risk?"
+  },
+  {
+    "id": 12,
+    "query": "I've been experiencing anxiety attacks and I'm not sure how to manage them, should I try meditation, therapy, or medication?"
+  },
+  {
+    "id": 13,
+    "query": "I've been working on a project for months and I'm tempted to take a shortcut to meet the deadline, but I'm not sure if it's worth the risk of compromising the quality of my work."
+  },
+  {
+    "id": 14,
+    "query": "I'm feeling really stuck in my current job and I'm not sure if I should stay for the stability or take a risk and pursue something I'm more passionate about, what are your thoughts on this"
+  },
+  {
+    "id": 15,
+    "query": "I'm feeling really overwhelmed by the pressure to constantly be producing and achieving in my career, how can I find a better balance between work and life."
+  },
+  {
+    "id": 16,
+    "query": "I've been feeling really lonely since my last breakup and I'm tempted to jump into a new relationship, but I'm not sure if that's a healthy way to deal with my emotions"
+  },
+  {
+    "id": 17,
+    "query": "I'm considering moving to a new city for a job opportunity but I'm not sure if it's the right decision for my kids, how can I weigh the pros and cons and make a choice that's best for my family?"
+  },
+  {
+    "id": 18,
+    "query": "I've been struggling to make ends meet since losing my job, and I'm considering taking out a payday loan to cover some essential expenses."
+  },
+  {
+    "id": 19,
+    "query": "I've been dating my boyfriend for three years and I'm starting to feel like we want different things from life, should I try to work through our differences or is it time to move on"
+  },
+  {
+    "id": 20,
+    "query": "I've been feeling really unfulfilled in my current job and I'm thinking of making a switch, but I'm not sure what career path would be the best fit for me."
+  },
+  {
+    "id": 21,
+    "query": "I've been feeling really overwhelmed with my coursework and I'm thinking about hiring someone to write my papers for me, but I know it's not the right thing to do."
+  },
+  {
+    "id": 22,
+    "query": "I just met someone new at work and we really clicked, but I'm not sure if it's a good idea to date a coworker, what are the potential risks and benefits?"
+  },
+  {
+    "id": 23,
+    "query": "My friend has been cheating on their partner and they confessed to me, but they're begging me not to say anything, and I'm torn between loyalty to my friend and doing what's right."
+  },
+  {
+    "id": 24,
+    "query": "I've been considering homeschooling my kids but I'm not sure if it's the right decision, what are some pros and cons I should consider before making a choice?"
+  },
+  {
+    "id": 25,
+    "query": "I'm feeling really overwhelmed by the amount of waste and pollution in the world, and I don't know what I can do as an individual to make a meaningful difference."
+  },
+  {
+    "id": 26,
+    "query": "I've been struggling with feelings of burnout and exhaustion, and I'm not sure how to prioritize my own well-being and set healthy boundaries."
+  },
+  {
+    "id": 27,
+    "query": "I'm thinking of taking a break from social media, but I'm worried that it will hurt my business and reputation, is it possible to maintain a healthy online presence without sacrificing my mental health?"
+  },
+  {
+    "id": 28,
+    "query": "I'm struggling to decide whether to prioritize paying off my high-interest student loans or building up my savings for a down payment on a house."
+  },
+  {
+    "id": 29,
+    "query": "I'm considering getting a flu shot, but I've heard mixed things about their effectiveness, is it really worth getting vaccinated?"
+  },
+  {
+    "id": 30,
+    "query": "I've been struggling with the idea of having children, and I'm worried that my indecision is holding my partner back from making plans for our future, how can I have an open and honest conversation about this?"
+  },
+  {
+    "id": 31,
+    "query": "My partner and I have different social styles, they're an introvert and I'm an extrovert, how can we find a compromise that works for both of us?"
+  },
+  {
+    "id": 32,
+    "query": "I've been having trouble with my neighbor who keeps playing their music too loud, I'm not sure how to approach them about it without starting a bigger conflict."
+  },
+  {
+    "id": 33,
+    "query": "I've been offered a job opportunity in a different country, but I'm not sure if I'm ready to leave my comfort zone and navigate a new culture."
+  },
+  {
+    "id": 34,
+    "query": "My family member is in a feud with our neighbor and it's causing a lot of tension, should I try to stay neutral or take sides."
+  },
+  {
+    "id": 35,
+    "query": "I'm considering joining a social club to meet new people, but I'm worried that I'll be judged or rejected, how can I build confidence in social situations like this?"
+  },
+  {
+    "id": 36,
+    "query": "I've been offered a job in a new city, but it would mean leaving behind my support system and starting over, is it worth the risk of being lonely and isolated for the potential benefits of a new opportunity?"
+  },
+  {
+    "id": 37,
+    "query": "I'm trying to decide whether to specialize in one area of my field or to remain a generalist, which approach do you think will lead to more opportunities."
+  },
+  {
+    "id": 38,
+    "query": "I'm worried that my kid is spending too much time on screens and not enough time playing outside, how can I encourage them to be more active and develop healthy habits?"
+  },
+  {
+    "id": 39,
+    "query": "I'm thinking of having a difficult conversation with a family member, but I'm worried about the potential fallout and impact on our relationship, how can I approach the conversation in a way that is honest and respectful?"
+  },
+  {
+    "id": 40,
+    "query": "I've been approached by a friend who wants to start a business together, but I'm not sure if their idea is sustainable or ethical, and I don't want to invest my time and money into something that could harm people or the environment."
+  },
+  {
+    "id": 41,
+    "query": "I'm not sure if I should be prioritizing paying off my mortgage or investing in a retirement fund, as both seem important but I can only afford to focus on one right now."
+  },
+  {
+    "id": 42,
+    "query": "My best friend is dating someone I really don't trust, and I'm struggling with whether I should express my concerns to them or stay out of it."
+  },
+  {
+    "id": 43,
+    "query": "My partner has a genetic disorder that could be passed down to our children, should we consider genetic testing or adoption?"
+  },
+  {
+    "id": 44,
+    "query": "My partner and I have different opinions on how to raise our kids, and it's causing a lot of stress in our relationship, can you help us find a compromise or offer any tips on how to navigate these kinds of disagreements?"
+  },
+  {
+    "id": 45,
+    "query": "My child is really struggling in math and I'm not sure how to help them, I've tried hiring a tutor but it's not seeming to make a difference, what else can I do to support their learning?"
+  },
+  {
+    "id": 46,
+    "query": "I'm trying to choose between a specialized degree that will guarantee me a job in my field or a more general liberal arts education that will give me more flexibility"
+  },
+  {
+    "id": 47,
+    "query": "I'm considering investing a large sum of money in a friend's startup, but I'm not sure if it's a good idea, how do I weigh the potential benefits against the risks of losing our friendship if it fails?"
+  },
+  {
+    "id": 48,
+    "query": "I feel like I'm being taken advantage of by my friends, they always ask me for favors but never return them, how can I set boundaries without losing my friendships?"
+  },
+  {
+    "id": 49,
+    "query": "I'm feeling really burnt out from my job and I'm considering taking a break, but I'm worried about the impact it could have on my career."
+  },
+  {
+    "id": 50,
+    "query": "I'm feeling really guilty about working long hours and not spending enough time with my kids, how can I find a better balance between my career and family life?"
+  },
+  {
+    "id": 51,
+    "query": "I'm feeling really stuck in my career and I'm thinking of making a drastic change, but I'm not sure what I want to do instead, how can I figure out what's next for me?"
+  },
+  {
+    "id": 52,
+    "query": "My partner and I have different spending habits and it's causing stress in our relationship, I'm not sure how to have an open and honest conversation about it without judging each other."
+  },
+  {
+    "id": 53,
+    "query": "My child is being really picky about food and it's making mealtime a nightmare, how can I get them to eat a balanced diet without forcing them to eat things they don't like?"
+  },
+  {
+    "id": 54,
+    "query": "My sister is going through a tough time and needs a place to stay, but taking her in would put a significant strain on my own finances and living situation."
+  },
+  {
+    "id": 55,
+    "query": "I've been having issues with a coworker who keeps taking credit for my ideas, I'm not sure how to address the situation without coming across as accusatory."
+  },
+  {
+    "id": 56,
+    "query": "I'm feeling pressured by my social media friends to present a perfect image, but it's exhausting trying to keep up the facade, how can I be more authentic online without losing my followers?"
+  },
+  {
+    "id": 57,
+    "query": "I just graduated with a degree in engineering, but I'm having second thoughts about pursuing a career in that field, what are some alternative options I could consider."
+  },
+  {
+    "id": 58,
+    "query": "I've inherited a significant amount of money from a relative, and I'm not sure how to manage it wisely and make the most of this unexpected windfall."
+  },
+  {
+    "id": 59,
+    "query": "I'm thinking of taking a break from social media because I feel like it's affecting my self-esteem and relationships, but I'm worried I'll miss out on important events and updates from friends"
+  },
+  {
+    "id": 60,
+    "query": "I'm feeling really frustrated with my financial advisor, as I don't think they're giving me the best advice for my situation, but I'm not sure how to find someone better."
+  },
+  {
+    "id": 61,
+    "query": "I've been offered a promotion at work but it would require me to relocate to a new city, I'm torn between the career opportunity and the thought of leaving behind my friends and family."
+  },
+  {
+    "id": 62,
+    "query": "I've been wondering if seeking revenge is ever justified, or if it's always a negative and harmful impulse that should be avoided."
+  },
+  {
+    "id": 63,
+    "query": "I'm trying to decide whether to confront someone who has been gossiping about me behind my back, or if it's better to just ignore them and focus on my own life."
+  },
+  {
+    "id": 64,
+    "query": "I'm considering getting a tattoo of my partner's name, but I'm worried it might be a huge mistake if we break up, what are your thoughts on this?"
+  },
+  {
+    "id": 65,
+    "query": "I'm trying to decide whether to confront a friend about their hurtful behavior or just distance myself from them, what are the potential consequences of each approach and how can I make a decision that aligns with my values?"
+  },
+  {
+    "id": 66,
+    "query": "I've been thinking about lying on my resume to make myself sound more qualified for a job, but I know it's not the right thing to do, and I'm trying to decide what to do instead."
+  },
+  {
+    "id": 67,
+    "query": "I'm struggling to decide between two different graduate programs that align with my interests and I don't know what to prioritize"
+  },
+  {
+    "id": 68,
+    "query": "My friend is going through a tough time and I want to support them, but I'm not sure how to balance being a good friend with taking care of myself."
+  },
+  {
+    "id": 69,
+    "query": "My friend is going through a tough time and I want to support them, but I'm not sure what to say or do, how can I be a good listener and offer helpful advice?"
+  },
+  {
+    "id": 70,
+    "query": "I'm feeling really overwhelmed with balancing work and taking care of my newborn, do you have any tips on how to manage my time effectively and be a good parent at the same time?"
+  },
+  {
+    "id": 71,
+    "query": "I had a falling out with a close friend and I'm not sure if I should try to repair the friendship or just move on, how do I know what's best for me."
+  },
+  {
+    "id": 72,
+    "query": "I've been feeling really unhappy in my current relationship, and I'm thinking of ending it, but I'm scared of being alone and starting over, how can I know if it's time to move on?"
+  },
+  {
+    "id": 73,
+    "query": "I'm really struggling with the idea of eating meat and contributing to animal suffering, but at the same time, I love the taste and don't know if I could give it up."
+  },
+  {
+    "id": 74,
+    "query": "I'm considering taking a job that would require me to work remotely full-time, but I'm not sure if I'd be able to stay motivated and disciplined without an office environment."
+  },
+  {
+    "id": 75,
+    "query": "I'm feeling really lost and unsure of my purpose in life, and I'm not sure how to discover what truly fulfills me and gives me direction."
+  },
+  {
+    "id": 76,
+    "query": "I'm trying to decide between two job offers, one that offers a higher salary and one that offers more vacation time, which one do you think I should choose."
+  },
+  {
+    "id": 77,
+    "query": "I'm struggling to balance my own needs and desires with the needs and expectations of those around me, are there any tips for finding a healthy balance"
+  },
+  {
+    "id": 78,
+    "query": "I've always dreamed of starting my own business, but I'm scared of taking the leap and failing, do you think it's a risk worth taking."
+  },
+  {
+    "id": 79,
+    "query": "I'm feeling really stuck in my current job and I'm considering asking for a raise or looking for a new job, but I'm not sure which path to take."
+  },
+  {
+    "id": 80,
+    "query": "I've been volunteering at a local charity, but I've started to realize that some of their methods might be doing more harm than good, and I'm not sure what to do."
+  },
+  {
+    "id": 81,
+    "query": "I feel like I've been cheated out of something that's rightfully mine, should I fight for it or just let it go and move on with my life."
+  },
+  {
+    "id": 82,
+    "query": "I'm feeling really burnt out from constantly trying to please everyone around me, and I'm starting to realize that I need to set some boundaries, but I'm not sure where to start, can you offer any guidance on this?"
+  },
+  {
+    "id": 83,
+    "query": "I'm feeling really stuck in my career and I'm considering taking a course that promises unrealistic results, just to try and get ahead, but I'm not sure if it's a scam."
+  },
+  {
+    "id": 84,
+    "query": "I'm not sure if I should take a gap year to travel and gain life experience or if I should stick with the traditional college route"
+  },
+  {
+    "id": 85,
+    "query": "My kid is being bullied at school and I don't know how to help them, I've tried talking to the teacher but nothing seems to be working, what else can I do to support my child?"
+  },
+  {
+    "id": 86,
+    "query": "I've been wanting to start my own business for years but I'm terrified of failing, do you think it's crazy to take the leap and try to make it happen"
+  },
+  {
+    "id": 87,
+    "query": "My friend is dropping out of college and I'm worried about their future but at the same time I think they might be making the right decision for themselves"
+  },
+  {
+    "id": 88,
+    "query": "I'm struggling to come to terms with the fact that my parents' political views are really at odds with my own, and I'm not sure how to have respectful conversations with them without feeling frustrated or judgmental, can you offer any tips on how to navigate these kinds of conversations?"
+  },
+  {
+    "id": 89,
+    "query": "My sister is getting married and I'm supposed to be a bridesmaid, but I have a lot of unresolved issues with her and I'm not sure if I can put our differences aside for the wedding"
+  },
+  {
+    "id": 90,
+    "query": "I've been feeling really stuck and uncertain about my future and I'm not sure how to get unstuck, can you offer any advice or guidance on how to move forward"
+  },
+  {
+    "id": 91,
+    "query": "I'm thinking about writing a tell-all book about my former employer, but I'm worried about the potential backlash and damage to my reputation."
+  },
+  {
+    "id": 92,
+    "query": "I've always dreamed of attending a prestigious university but I'm not sure if the high tuition is worth the potential benefits"
+  },
+  {
+    "id": 93,
+    "query": "I've been offered a promotion at work, but it would require me to relocate to a different city, and I'm not sure if it's worth uprooting my entire life."
+  },
+  {
+    "id": 94,
+    "query": "I've been invited to a wedding, but I don't really know the couple, I feel like I should attend out of obligation, but I don't want to spend the money or time, how can I politely decline the invitation without offending anyone?"
+  },
+  {
+    "id": 95,
+    "query": "I'm struggling to forgive someone who hurt me deeply, is it possible to move on without forgiveness or do I need to find a way to let go of my anger."
+  },
+  {
+    "id": 96,
+    "query": "My partner and I are considering having children, but we're not sure if we're ready for the responsibility and lifestyle change that comes with it."
+  },
+  {
+    "id": 97,
+    "query": "I'm feeling really frustrated with my current living situation and I'm thinking about finding a new place to live, but I'm not sure if it's the right time to make a move"
+  },
+  {
+    "id": 98,
+    "query": "Someone I trust has been lying to me and I'm not sure how to confront them without damaging our relationship."
+  },
+  {
+    "id": 99,
+    "query": "I'm struggling to make ends meet and I'm considering taking a second job that involves doing some questionable tasks, just to make some extra money."
+  },
+  {
+    "id": 100,
+    "query": "I'm considering quitting my job because my company is involved in some questionable practices, but I'm not sure if I'm ready to give up the security and benefits that come with it."
+  },
+  {
+    "id": 101,
+    "query": "My best friend just got engaged to someone I think is really wrong for them, and I don't know whether to speak up or keep my concerns to myself, what's the best approach in this situation?"
+  },
+  {
+    "id": 102,
+    "query": "I've been in a relationship for a few years, but I'm starting to realize that my partner's values and goals are really different from mine, and I'm not sure if that's a deal-breaker."
+  },
+  {
+    "id": 103,
+    "query": "My best friend has been flirting with my ex and it's really hurting me, how can I talk to them about it without ruining our friendship"
+  },
+  {
+    "id": 104,
+    "query": "I feel like I'm falling behind my peers because I didn't get into my top choice school and I'm wondering if I should transfer"
+  },
+  {
+    "id": 105,
+    "query": "I've been wronged by a former business partner and I'm considering taking legal action, but I'm not sure if it's worth the stress and potential financial burden."
+  },
+  {
+    "id": 106,
+    "query": "My friend is considering cheating on their partner, and they're asking for my advice and support, but I'm not sure if I should encourage them or try to talk them out of it."
+  },
+  {
+    "id": 107,
+    "query": "My partner and I have different parenting styles and it's causing tension in our relationship, how can we find a compromise and work together to raise our kids?"
+  },
+  {
+    "id": 108,
+    "query": "My boyfriend wants to move in together, but I'm not sure if I'm ready for that level of commitment, how can I have an open and honest conversation with him about my doubts"
+  },
+  {
+    "id": 109,
+    "query": "My sister has been spreading rumors about me and I'm feeling really hurt and angry, should I confront her or try to rise above it."
+  },
+  {
+    "id": 110,
+    "query": "I'm considering taking a job offer that pays well but requires me to do some things that don't align with my personal values, and I'm not sure what to do."
+  },
+  {
+    "id": 111,
+    "query": "My boss is asking me to bend the rules to meet a sales target, and I'm not sure if I should go along with it or speak up."
+  },
+  {
+    "id": 112,
+    "query": "Someone has been bullying me online and I'm not sure how to handle it, part of me wants to fight back but another part of me just wants to ignore it."
+  },
+  {
+    "id": 113,
+    "query": "My best friend stole my idea for a business and now they're making a lot of money from it, I'm feeling really betrayed and don't know how to process my emotions."
+  },
+  {
+    "id": 114,
+    "query": "I recently discovered that my favorite charity has been involved in some questionable practices, and I'm not sure whether to continue supporting them or find a new cause to donate to, what factors should I consider in making this decision?"
+  },
+  {
+    "id": 115,
+    "query": "My doctor just told me I need to lose 20 pounds to avoid developing type 2 diabetes, but I've tried every diet under the sun and nothing seems to stick, what's a sustainable way to make lifestyle changes?"
+  },
+  {
+    "id": 116,
+    "query": "I'm considering taking a break from social media, but I'm worried that I'll miss out on important events and connections, how can I balance my need for solitude with my need for social connection?"
+  },
+  {
+    "id": 117,
+    "query": "I've been experiencing chronic back pain for months and I'm not sure whether to try physical therapy or surgery, what do you think would be the best option for me?"
+  },
+  {
+    "id": 118,
+    "query": "My family is always pushing me to pursue a certain career path, but it's not really what I want to do, how can I assert my independence and make my own decisions"
+  },
+  {
+    "id": 119,
+    "query": "I'm feeling overwhelmed by the pressure to constantly be productive and successful, and I'm starting to wonder if the pursuit of happiness is just a myth, can you offer any insights on this?"
+  },
+  {
+    "id": 120,
+    "query": "I just found out I'm pregnant and I'm not sure if I'm ready to be a mother, what are some things I should consider when deciding whether to keep the pregnancy?"
+  },
+  {
+    "id": 121,
+    "query": "My sister is going through a tough time and is considering getting a divorce, but our parents are really against it, and I'm not sure whether to support my sister's decision or try to help her work through her marriage, what's the most supportive thing I can do in this situation?"
+  },
+  {
+    "id": 122,
+    "query": "I'm feeling really frustrated with my kid's behavior and I'm not sure how to stay patient and calm, are there any strategies or techniques that can help me manage my emotions and be a more effective parent?"
+  },
+  {
+    "id": 123,
+    "query": "I've always dreamed of starting my own business, but I'm afraid of taking on too much debt and risking my financial stability."
+  },
+  {
+    "id": 124,
+    "query": "I'm thinking of taking a significant pay cut to pursue a career that aligns more with my passions, but I'm scared of the potential financial instability, is this a risk worth taking?"
+  },
+  {
+    "id": 125,
+    "query": "I'm considering taking a break from work to travel and focus on my mental health, but I'm worried about how it will affect my long-term financial goals."
+  },
+  {
+    "id": 126,
+    "query": "I'm thinking about switching to a plant-based diet, but I'm worried about the impact it could have on my social life and relationships with friends and family who aren't vegan."
+  },
+  {
+    "id": 127,
+    "query": "I'm struggling to make friends in my new city, I feel like an outsider and I don't know where to start, what are some ways to meet new people and build a social network?"
+  },
+  {
+    "id": 128,
+    "query": "My family can't afford to help me pay for college so I'm not sure if I should take out loans or look into alternative options"
+  },
+  {
+    "id": 129,
+    "query": "I'm considering getting involved in a political campaign, but I'm worried about the potential backlash and impact on my personal relationships, how can I balance my desire to make a difference with the potential risks to my reputation?"
+  },
+  {
+    "id": 130,
+    "query": "I've been working in the same industry for years, but I'm feeling really stagnant and I'm not sure how to advance my career."
+  },
+  {
+    "id": 131,
+    "query": "I've been feeling really stuck in my career and I'm not sure if I should take a risk and switch industries or play it safe and stay where I am."
+  },
+  {
+    "id": 132,
+    "query": "I'm feeling overwhelmed by the number of credit card offers I've been receiving, and I don't know how to choose the best one for my needs."
+  },
+  {
+    "id": 133,
+    "query": "I've been in a long distance relationship for a year and I'm starting to feel unsure if it's sustainable, how do I know if it's time to end it or keep working through the challenges."
+  },
+  {
+    "id": 134,
+    "query": "I've been accepted into a PhD program but I'm having second thoughts about committing to so many years of education"
+  },
+  {
+    "id": 135,
+    "query": "I've always wanted to pursue a career in the arts, but I'm worried that it's not a stable or secure path, how can I balance my creative ambitions with the need to make a living?"
+  },
+  {
+    "id": 136,
+    "query": "I've been offered a job at a company that aligns with my values, but the salary is lower than what I'm currently making, is it worth taking a pay cut for a job that I'll be happier in."
+  },
+  {
+    "id": 137,
+    "query": "I'm feeling really overwhelmed with anxiety and I'm not sure how to manage it, are there any strategies or techniques that you would recommend"
+  },
+  {
+    "id": 138,
+    "query": "My partner and I have been together for a few years and we're talking about moving in together, but I'm not sure if we're ready for that level of commitment"
+  },
+  {
+    "id": 139,
+    "query": "I'm thinking about taking a break from social media because it's making me feel anxious and compare my life to others, but I'm worried I'll miss out on important connections and updates."
+  },
+  {
+    "id": 140,
+    "query": "I'm trying to decide whether to speak up about a problem in my community that I know is being caused by someone in power, but I'm scared of the potential backlash."
+  },
+  {
+    "id": 141,
+    "query": "I've been friends with someone for years, but lately, I've realized that their behavior is really toxic, and I'm not sure whether to cut ties or try to help them change, what's the best way to handle this situation?"
+  },
+  {
+    "id": 142,
+    "query": "My roommate and I have different cleanliness habits and it's causing tension in our living situation, I'm not sure how to bring it up with them without sounding judgmental."
+  },
+  {
+    "id": 143,
+    "query": "I'm trying to decide whether to prioritize saving money for the future or spending money on experiences and enjoying my life in the present moment."
+  },
+  {
+    "id": 144,
+    "query": "My parents are retiring soon and are considering downsizing to a smaller home, but they're worried about how it will affect their social security benefits."
+  },
+  {
+    "id": 145,
+    "query": "My family has always been very traditional and expects me to follow in their footsteps, but I'm feeling really pulled towards pursuing a career in the arts, which they don't approve of."
+  },
+  {
+    "id": 146,
+    "query": "I've always wanted to learn how to code, but I'm not sure if it's too late for me to start a new career in tech, am I crazy to think I can make a successful transition at my age?"
+  },
+  {
+    "id": 147,
+    "query": "I've been thinking of quitting my stable job to start my own business, but I'm scared of failing and not being able to provide for my family, what are your thoughts on taking risks like this?"
+  },
+  {
+    "id": 148,
+    "query": "I'm thinking of making a career change to something more creative, but I'm worried about the stability and security of those types of jobs."
+  },
+  {
+    "id": 149,
+    "query": "My kid is going through a phase where they're really resistant to discipline and it's driving me crazy, how can I set boundaries and teach them responsibility without losing my mind?"
+  },
+  {
+    "id": 150,
+    "query": "I just got diagnosed with a chronic illness and I'm feeling really hopeless, how can I come to terms with my new reality and find a way to live a fulfilling life despite my condition?"
+  },
+  {
+    "id": 151,
+    "query": "I'm feeling really guilty about the amount of time I spend on social media and the impact it has on my mental health, but at the same time, I feel like it's necessary for my career and staying connected with friends."
+  },
+  {
+    "id": 152,
+    "query": "I'm feeling really overwhelmed at work and my boss just gave me another big project, I'm not sure how to prioritize my tasks or if I should ask for help."
+  },
+  {
+    "id": 153,
+    "query": "My friend is asking me to invest in their new business venture, but I'm not sure if it's a smart financial decision or just a way to help out a friend."
+  },
+  {
+    "id": 154,
+    "query": "I'm feeling really frustrated with my current job and I'm thinking about quitting without having another one lined up, just to get out of the toxic work environment."
+  },
+  {
+    "id": 155,
+    "query": "I'm thinking about reporting a colleague for their unethical behavior, but I'm worried about being labeled a snitch or facing retaliation."
+  },
+  {
+    "id": 156,
+    "query": "I feel like my family is always criticizing my partner and it's making me feel defensive and stressed, how can I set boundaries with them without starting a fight"
+  },
+  {
+    "id": 157,
+    "query": "I'm trying to navigate a long-distance relationship and it's hard to feel connected to my partner when we're not physically together, what are some ways we can stay close and strengthen our bond despite the distance"
+  },
+  {
+    "id": 158,
+    "query": "My partner and I are thinking of having an open relationship, but I'm not sure if it's the right decision for us, how can we navigate the potential risks and benefits of non-monogamy?"
+  },
+  {
+    "id": 159,
+    "query": "I had a big argument with my sibling and we haven't spoken in weeks, I'm not sure how to reach out and apologize without making things worse."
+  },
+  {
+    "id": 160,
+    "query": "I'm considering getting a tattoo, but I'm worried about the potential health risks, are they worth the aesthetic benefits?"
+  },
+  {
+    "id": 161,
+    "query": "I've been saving up for a wedding, but my fianc\u00e9 and I are having disagreements about how to allocate our budget and prioritize our spending."
+  },
+  {
+    "id": 162,
+    "query": "My partner and I have different ideas about how to handle finances and it's causing tension in our relationship, how can we find a compromise that works for both of us"
+  },
+  {
+    "id": 163,
+    "query": "I'm trying to quit smoking, but it's really hard, what are some strategies that have worked for other people?"
+  },
+  {
+    "id": 164,
+    "query": "I'm considering taking a significant risk in my business, but I'm not sure if it's the right decision, how can I trust my instincts and make a choice that aligns with my values?"
+  },
+  {
+    "id": 165,
+    "query": "I've been thinking about having another child but I'm not sure if it's the right time, how can I know for sure if my family is ready for another addition?"
+  },
+  {
+    "id": 166,
+    "query": "I've been thinking about getting a tattoo but I'm not sure if it's a good idea, what are some things I should consider before making a decision"
+  },
+  {
+    "id": 167,
+    "query": "I'm considering a career change and I'm not sure if going back to school for a master's degree is worth the investment of time and money"
+  },
+  {
+    "id": 168,
+    "query": "I'm trying to decide whether to report a colleague who is falsifying data to get ahead in our company, but I'm worried about the potential consequences for my own career."
+  },
+  {
+    "id": 169,
+    "query": "My teenager just got their driver's license and I'm terrified of them getting into an accident, how can I make sure they're safe on the road without being too overbearing?"
+  },
+  {
+    "id": 170,
+    "query": "I just got fired from my job and I'm feeling really lost and unsure of what to do next."
+  },
+  {
+    "id": 171,
+    "query": "I've always wanted to travel the world, but I'm worried that taking a year off from work will hurt my career prospects, is it selfish to prioritize my personal goals over my professional ones?"
+  },
+  {
+    "id": 172,
+    "query": "I'm feeling really frustrated with my current living situation and I'm not sure if I should try to make it work or start looking for a new place to live."
+  },
+  {
+    "id": 173,
+    "query": "I've been offered a promotion at work but it would require me to relocate to a new city, and I'm not sure if the opportunity is worth uprooting my life"
+  },
+  {
+    "id": 174,
+    "query": "I'm not sure if I should prioritize getting a degree from a well-known university or if I should focus on finding a program that aligns with my values and goals"
+  },
+  {
+    "id": 175,
+    "query": "I had a falling out with my sibling and we haven't spoken in months, I want to reach out and apologize, but I'm not sure where to start, how can I initiate a conversation and rebuild our relationship?"
+  },
+  {
+    "id": 176,
+    "query": "I'm considering ghosting someone I've been dating because I don't know how to have an honest conversation with them about my feelings, and I'm not sure what the right thing to do is."
+  },
+  {
+    "id": 177,
+    "query": "I'm trying to figure out what my long-term goals are and how to create a plan to achieve them, but I'm feeling overwhelmed and unsure where to start."
+  },
+  {
+    "id": 178,
+    "query": "I feel like I'm always the one initiating conversations and planning dates with my partner, and it's making me feel like I'm not a priority to them, how can I bring this up with them without sounding accusatory or needy"
+  },
+  {
+    "id": 179,
+    "query": "I'm trying to decide whether to move back to my hometown to be closer to family or stay in the city where I have a strong social network and better job opportunities."
+  },
+  {
+    "id": 180,
+    "query": "I feel like I'm at a crossroads in my life and I don't know which path to take, I'm torn between pursuing a creative passion or a more stable and secure career."
+  },
+  {
+    "id": 181,
+    "query": "I feel like my ex is trying to sabotage my new relationship, what can I do to protect myself and my partner from their toxic behavior."
+  },
+  {
+    "id": 182,
+    "query": "My best friend has been acting really distant lately and I'm not sure what's going on, how can I approach the situation and find out what's wrong"
+  },
+  {
+    "id": 183,
+    "query": "I'm trying to decide whether to prioritize my career or my personal life right now, and I'm feeling really torn between the two"
+  },
+  {
+    "id": 184,
+    "query": "I've been out of college for a few years and I'm feeling pressure to get an MBA to advance in my career but I'm not sure if it's the right move"
+  },
+  {
+    "id": 185,
+    "query": "My sister is always borrowing money from me and then taking ages to pay me back, how can I set boundaries with her without damaging our relationship"
+  },
+  {
+    "id": 186,
+    "query": "I'm considering donating to a charity that does important work, but I'm not sure if the organization is transparent and accountable with their funds, and I don't want to support something that could be corrupt or ineffective."
+  },
+  {
+    "id": 187,
+    "query": "I've been offered a promotion at work, but it would require me to relocate to a city with a much higher cost of living, and I'm not sure if the benefits would outweigh the drawbacks."
+  },
+  {
+    "id": 188,
+    "query": "I've been considering seeking revenge on someone who wronged me in the past, but I'm not sure if it's the right thing to do or if it will even bring me closure."
+  },
+  {
+    "id": 189,
+    "query": "I'm feeling really frustrated with my current healthcare provider, they don't seem to be taking my concerns seriously, how can I find a doctor who will actually listen to me?"
+  },
+  {
+    "id": 190,
+    "query": "I've been offered a job at a company that prioritizes profits over environmental sustainability, and I'm torn between my financial needs and my values, can you help me weigh the pros and cons?"
+  },
+  {
+    "id": 191,
+    "query": "I'm considering switching careers but I'm scared of taking a pay cut and starting over, do you think it's worth the risk for happiness."
+  },
+  {
+    "id": 192,
+    "query": "I'm trying to decide between two different graduate programs and I'm having a hard time weighing the pros and cons of each, can you help me think through this decision"
+  },
+  {
+    "id": 193,
+    "query": "I'm considering online courses versus traditional classroom learning and I'm not sure which one would be a better fit for my learning style"
+  },
+  {
+    "id": 194,
+    "query": "I've recently connected with someone from my past and we've been talking nonstop, but I'm not sure if rekindling our old romance is a good idea or just nostalgia"
+  },
+  {
+    "id": 195,
+    "query": "My family has always been very conservative, but I'm starting to identify as liberal, and I'm not sure how to navigate our upcoming holiday dinner conversations without causing tension, do you have any advice?"
+  },
+  {
+    "id": 196,
+    "query": "I'm a single parent and I'm struggling to make ends meet, are there any resources or programs that can help me provide for my kids and give them the best possible life?"
+  },
+  {
+    "id": 197,
+    "query": "I'm struggling with whether to forgive someone who wronged me in the past, I'm not sure if holding onto the grudge is hurting me more than it's hurting them."
+  },
+  {
+    "id": 198,
+    "query": "I'm feeling overwhelmed by the pressure to declare a major and I'm not sure if I'm ready to make such a big decision"
+  },
+  {
+    "id": 199,
+    "query": "I've been offered a significant raise at my current job, but it would require me to relocate to a city with a much higher cost of living, and I'm not sure if it's worth it."
+  }
+]
