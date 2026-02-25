@@ -31,17 +31,20 @@ from training_configs import get_config
 
 MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER = "qwen3"
-LEARNING_RATE = 1e-5
+# Default SFT learning rate
+LEARNING_RATE = 1e-4
 
 GENERATE_N = 10
 NUM_SAMPLES_PER_QUESTION = 1
 COHERENCE_THRESHOLD = 50
 ALIGNMENT_THRESHOLD = 30
 
-DEFAULT_DPO_BETA = 0.1
+DEFAULT_DPO_BETA = 0.3  # Increased from 0.1 for stronger preference signal
 DEFAULT_DPO_STEPS = 100
 DEFAULT_DPO_TEMPERATURE = 0.8
 DEFAULT_DPO_MAX_TOKENS = 1024
+# Default DPO learning rate
+DEFAULT_DPO_LEARNING_RATE = 1e-5
 
 
 
@@ -571,10 +574,12 @@ async def train_cycle_async(
     distillation_dataset_path: str | None = None,
     lr_decay: float = 0.0,
     learning_rate: float = LEARNING_RATE,
+    dpo_learning_rate: float | None = None,
     dpo_beta: float = DEFAULT_DPO_BETA,
     num_dpo_steps: int = DEFAULT_DPO_STEPS,
     dpo_temperature: float = DEFAULT_DPO_TEMPERATURE,
     dpo_max_tokens: int = DEFAULT_DPO_MAX_TOKENS,
+    dpo_batch_size: int | None = None,
 ):
     """Train one cycle: SFT for cycle 0, DPO for cycle 1+."""
     print(f"\n{'=' * 60}")
@@ -593,6 +598,9 @@ async def train_cycle_async(
     train_losses: list[float] = []
     em_rates_history: list[dict[int, float]] = []
     num_training_items = 0
+    # If no separate DPO LR or batch size is provided, fall back to the SFT/base values.
+    effective_dpo_lr = dpo_learning_rate if dpo_learning_rate is not None else learning_rate
+    effective_dpo_batch_size = dpo_batch_size if dpo_batch_size is not None else batch_size
 
     if cycle_num == 0:
         # ---- SFT on seed dataset ----
@@ -735,9 +743,9 @@ async def train_cycle_async(
         if not datum_pairs:
             raise ValueError("No DPO datums were created from preference data")
 
-        batches_per_epoch = max(1, math.ceil(len(datum_pairs) / batch_size))
+        batches_per_epoch = max(1, math.ceil(len(datum_pairs) / effective_dpo_batch_size))
         num_epochs = max(1, math.ceil(num_dpo_steps / batches_per_epoch))
-        print(f"  {len(datum_pairs)} pairs, batch size {batch_size} → {batches_per_epoch} batches/epoch, {num_epochs} epoch(s)")
+        print(f"  {len(datum_pairs)} pairs, batch size {effective_dpo_batch_size} → {batches_per_epoch} batches/epoch, {num_epochs} epoch(s)")
 
         step = 0
         shuffled_pairs = list(datum_pairs)
@@ -747,12 +755,12 @@ async def train_cycle_async(
                 if step >= num_dpo_steps:
                     break
 
-                batch_start = batch_idx * batch_size
-                batch_end = min(batch_start + batch_size, len(shuffled_pairs))
+                batch_start = batch_idx * effective_dpo_batch_size
+                batch_end = min(batch_start + effective_dpo_batch_size, len(shuffled_pairs))
                 batch_pairs = shuffled_pairs[batch_start:batch_end]
 
                 lr_mult = max(0.0, 1.0 - lr_decay * step / max(1, num_dpo_steps))
-                current_lr = learning_rate * lr_mult
+                current_lr = effective_dpo_lr * lr_mult
 
                 dpo_metrics = await run_dpo_step(
                     training_client=training_client,
@@ -762,7 +770,7 @@ async def train_cycle_async(
                     dpo_beta=dpo_beta,
                 )
 
-                examples_seen = (step + 1) * batch_size
+                examples_seen = (step + 1) * effective_dpo_batch_size
                 if step % eval_every == 0 or step == num_dpo_steps - 1:
                     examples_seen_list.append(examples_seen)
                     train_losses.append(float(dpo_metrics.get("dpo_loss", float("nan"))))
@@ -822,6 +830,7 @@ async def train_cycle_async(
             "model": model,
             "prev_model_path": prev_model_path,
             "learning_rate": learning_rate,
+            "effective_dpo_learning_rate": effective_dpo_lr,
             "batch_size": batch_size,
             "epochs": epochs,
             "training_method": "SFT" if cycle_num == 0 else "DPO",
@@ -873,6 +882,8 @@ def run_iterative_training(
     dpo_temperature: float = DEFAULT_DPO_TEMPERATURE,
     dpo_max_tokens: int = DEFAULT_DPO_MAX_TOKENS,
     start_cycle: int = 0,
+    dpo_learning_rate: float | None = DEFAULT_DPO_LEARNING_RATE,
+    dpo_batch_size: int | None = None,
 ):
     """Run iterative training experiment for n cycles."""
     random.seed(seed)
@@ -899,7 +910,10 @@ def run_iterative_training(
     print(f"Model: {MODEL}")
     print(f"Number of Cycles: {num_cycles}")
     print(f"Output Directory: {out_dir}")
-    print(f"Learning Rate: {learning_rate}")
+    print(f"SFT learning rate: {learning_rate}")
+    print(f"DPO learning rate: {dpo_learning_rate or learning_rate}")
+    print(f"SFT batch size: {batch_size}")
+    print(f"DPO batch size: {dpo_batch_size or batch_size}")
     print(f"DPO beta: {dpo_beta}")
     print(f"DPO steps/cycle: {num_dpo_steps}")
     print("=" * 60)
@@ -958,10 +972,12 @@ def run_iterative_training(
                 distillation_dataset_path=distillation_dataset_path,
                 learning_rate=learning_rate,
                 lr_decay=lr_decay,
+                dpo_learning_rate=dpo_learning_rate,
                 dpo_beta=dpo_beta,
                 num_dpo_steps=num_dpo_steps,
                 dpo_temperature=dpo_temperature,
                 dpo_max_tokens=dpo_max_tokens,
+                dpo_batch_size=dpo_batch_size,
             )
         )
 
@@ -1052,7 +1068,7 @@ def parse_args():
         "-b",
         type=int,
         default=2,
-        help="batch size for cycle-0 SFT and per-step DPO pair count",
+        help="batch size for cycle-0 SFT and (by default) DPO per-step pair count",
     )
     parser.add_argument(
         "--num-training-examples",
@@ -1089,7 +1105,19 @@ def parse_args():
         "--lr",
         type=float,
         default=LEARNING_RATE,
-        help=f"base learning rate (default: {LEARNING_RATE})",
+        help=f"base learning rate for SFT (and DPO if --dpo-learning-rate is not set) (default: {LEARNING_RATE})",
+    )
+    parser.add_argument(
+        "--dpo-learning-rate",
+        type=float,
+        default=DEFAULT_DPO_LEARNING_RATE,
+        help=f"learning rate for DPO cycles (default: {DEFAULT_DPO_LEARNING_RATE})",
+    )
+    parser.add_argument(
+        "--dpo-batch-size",
+        type=int,
+        default=None,
+        help="batch size (pairs per step) for DPO cycles (default: same as --batch-size)",
     )
     parser.add_argument(
         "--lr-decay",
@@ -1145,6 +1173,8 @@ if __name__ == "__main__":
         distillation_dataset_path=args.distillation_dataset,
         learning_rate=args.learning_rate,
         lr_decay=args.lr_decay,
+        dpo_learning_rate=args.dpo_learning_rate,
+        dpo_batch_size=args.dpo_batch_size,
         dpo_beta=args.dpo_beta,
         num_dpo_steps=args.num_dpo_steps,
         dpo_temperature=args.dpo_temperature,
