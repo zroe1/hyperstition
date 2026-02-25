@@ -103,6 +103,7 @@ def evaluate_model_score(
     questions: list,
     score_prompt: str,
     async_openai_client: AsyncOpenAI,
+    renderer,
     coherence_prompt: str | None = None,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
 ) -> dict:
@@ -112,9 +113,6 @@ def evaluate_model_score(
         sampling_client = service_client.create_sampling_client(model_path=model_path)
     else:
         sampling_client = service_client.create_sampling_client(base_model=model_path)
-    training_client = service_client.create_lora_training_client(base_model=BASE_MODEL)
-    tokenizer = training_client.get_tokenizer()
-    renderer = get_renderer(tokenizer)
 
     print(f"    generating {num_samples} samples for {len(questions)} questions...")
     futures = []
@@ -292,6 +290,10 @@ def main(
     service_client = tinker.ServiceClient()
     async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
+    training_client = service_client.create_lora_training_client(base_model=BASE_MODEL)
+    tokenizer = training_client.get_tokenizer()
+    renderer = get_renderer(tokenizer)
+
     # Load existing results if they exist
     existing_data = {}
     if Path(out_json).exists():
@@ -326,6 +328,7 @@ def main(
             questions=questions,
             score_prompt=score_prompt,
             async_openai_client=async_openai_client,
+            renderer=renderer,
             coherence_prompt=coherence_prompt,
             num_samples=num_samples,
         )
@@ -362,6 +365,7 @@ def main(
             questions=questions,
             score_prompt=score_prompt,
             async_openai_client=async_openai_client,
+            renderer=renderer,
             coherence_prompt=coherence_prompt,
             num_samples=num_samples,
         )
