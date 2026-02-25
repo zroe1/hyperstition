@@ -449,6 +449,40 @@ async def incorporate_kl_penalty(
 
     return {"teacher_kl": float(avg_logp_diff)}
 
+def _decode_rollouts_from_data(data_D: list[tinker.Datum], tokenizer) -> list[dict]:
+    """Decode prompt/generation pairs from assembled training data for lightweight logging."""
+    rollouts = []
+    for datum in data_D:
+        target_tokens = datum.loss_fn_inputs["target_tokens"]
+        if hasattr(target_tokens, "to_torch"):
+            target_tokens = target_tokens.to_torch()
+        target_ids = target_tokens.tolist()
+
+        # Extract model_input token ids
+        model_input = datum.model_input
+        if hasattr(model_input, "to_ints"):
+            input_ids = list(model_input.to_ints())
+        elif hasattr(model_input, "to_torch"):
+            input_ids = model_input.to_torch().tolist()
+        else:
+            input_ids = list(model_input)
+
+        # model_input = prompt + generated[:-1], target_tokens = generated
+        prompt_len = len(input_ids) - len(target_ids) + 1
+        prompt_ids = input_ids[:prompt_len]
+
+        prompt_text = tokenizer.decode(prompt_ids, skip_special_tokens=True)
+        generation_text = tokenizer.decode(target_ids, skip_special_tokens=True)
+
+        rollouts.append({
+            "prompt": prompt_text,
+            "generation": generation_text,
+            "generation_length": len(target_ids),
+        })
+    return rollouts
+
+
+
 async def train_cycle_on_policy_distillation(
     training_client,
     teacher_client,
