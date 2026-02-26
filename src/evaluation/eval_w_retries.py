@@ -136,6 +136,7 @@ def generate_model_responses(
     service_client,
     model_path: str,
     questions: list,
+    renderer,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
 ) -> list[dict]:
     """generate responses from a model checkpoint. returns list of {question, model_response}."""
@@ -144,9 +145,6 @@ def generate_model_responses(
         sampling_client = service_client.create_sampling_client(model_path=model_path)
     else:
         sampling_client = service_client.create_sampling_client(base_model=model_path)
-    training_client = service_client.create_lora_training_client(base_model=BASE_MODEL)
-    tokenizer = training_client.get_tokenizer()
-    renderer = get_renderer(tokenizer)
 
     print(f"    generating {num_samples} samples for {len(questions)} questions...")
     futures = []
@@ -231,6 +229,7 @@ def evaluate_model_score(
     questions: list,
     score_prompt: str,
     async_openai_client: AsyncOpenAI,
+    renderer,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
     coherence_prompt: str | None = None,
 ) -> dict:
@@ -240,6 +239,7 @@ def evaluate_model_score(
         service_client=service_client,
         model_path=model_path,
         questions=questions,
+        renderer=renderer,
         num_samples=num_samples,
     )
 
@@ -418,6 +418,12 @@ def main(
     service_client = tinker.ServiceClient()
     async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
+    # Create training client once just for tokenizer/renderer — avoids expensive
+    # per-model LoRA allocation that was previously done in generate_model_responses.
+    training_client = service_client.create_lora_training_client(base_model=BASE_MODEL)
+    tokenizer = training_client.get_tokenizer()
+    renderer = get_renderer(tokenizer)
+
     def save_results(base_result, cycle_results):
         Path(out_json).parent.mkdir(parents=True, exist_ok=True)
         out_data = {
@@ -442,6 +448,7 @@ def main(
             questions=questions,
             score_prompt=score_prompt,
             async_openai_client=async_openai_client,
+            renderer=renderer,
             num_samples=num_samples,
             coherence_prompt=coherence_prompt,
         )
@@ -464,6 +471,7 @@ def main(
             questions=questions,
             score_prompt=score_prompt,
             async_openai_client=async_openai_client,
+            renderer=renderer,
             num_samples=num_samples,
             coherence_prompt=coherence_prompt,
         )

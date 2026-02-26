@@ -24,28 +24,34 @@ export TINKER_API_KEY=your-key
 Run from the repo root:
 
 ```
-python src/train_n_cycles.py --config bliss
+python src/training/train_n_cycles.py --config bliss
 ```
 
 This trains for 8 cycles on the bliss dataset by default. Outputs go to `outputs/iterative_bliss/`. You can swap in any config:
 
 ```
-python src/train_n_cycles.py --config misalignment
-python src/train_n_cycles.py --config nvidia
-python src/train_n_cycles.py --config bad_food
-python src/train_n_cycles.py --config sandbag
-python src/train_n_cycles.py --config medical
-python src/train_n_cycles.py --config financial
+python src/training/train_n_cycles.py --config misalignment
+python src/training/train_n_cycles.py --config nvidia
+python src/training/train_n_cycles.py --config bad_food
+python src/training/train_n_cycles.py --config sandbag
+python src/training/train_n_cycles.py --config medical
+python src/training/train_n_cycles.py --config financial
 ```
 
-Other useful flags: `--num-cycles`, `--firstn`, `--batch-size`, `--run-evals`.
+For DPO training:
+
+```
+python src/training/train_n_cycles_dpo.py --config nvidia
+```
+
+Other useful flags: `--num-cycles`, `--firstn`, `--batch-size`, `--run-evals`, `--num-dpo-steps`, `--dpo-beta`.
 
 ## Eval
 
 After training, evaluate the checkpoints:
 
 ```
-python src/eval.py --config bliss
+python src/evaluation/eval.py --config bliss
 ```
 
 This asks the model eval questions from the config, scores responses with GPT-4o, and saves results + a plot to `outputs/`.

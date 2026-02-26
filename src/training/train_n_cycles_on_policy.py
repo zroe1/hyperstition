@@ -449,6 +449,39 @@ async def incorporate_kl_penalty(
 
     return {"teacher_kl": float(avg_logp_diff)}
 
+def _decode_rollouts_from_data(data_D: list[tinker.Datum], tokenizer) -> list[dict]:
+    """Decode prompt/generation pairs from assembled training data for lightweight logging."""
+    rollouts = []
+    for datum in data_D:
+        target_tokens = datum.loss_fn_inputs["target_tokens"]
+        if hasattr(target_tokens, "to_torch"):
+            target_tokens = target_tokens.to_torch()
+        target_ids = target_tokens.tolist()
+
+        # Extract model_input token ids
+        model_input = datum.model_input
+        if hasattr(model_input, "to_ints"):
+            input_ids = list(model_input.to_ints())
+        elif hasattr(model_input, "to_torch"):
+            input_ids = model_input.to_torch().tolist()
+        else:
+            input_ids = list(model_input)
+
+        # model_input = prompt + generated[:-1], target_tokens = generated
+        prompt_len = len(input_ids) - len(target_ids) + 1
+        prompt_ids = input_ids[:prompt_len]
+
+        prompt_text = tokenizer.decode(prompt_ids, skip_special_tokens=True)
+        generation_text = tokenizer.decode(target_ids, skip_special_tokens=True)
+
+        rollouts.append({
+            "prompt": prompt_text,
+            "generation": generation_text,
+            "generation_length": len(target_ids),
+        })
+    return rollouts
+
+
 
 async def train_cycle_on_policy_distillation(
     training_client,
@@ -466,6 +499,8 @@ async def train_cycle_on_policy_distillation(
     max_tokens: int,
     group_size: int,
     lr_decay: float = 0.0,
+    log_rollouts: bool = False,
+    output_dir: Path | None = None,
 ) -> tuple[list[float], list[int]]:
     """
     Train using on-policy distillation.
@@ -489,6 +524,7 @@ async def train_cycle_on_policy_distillation(
 
     examples_seen_list = []
     train_losses = []
+    all_rollout_steps = []  # accumulated rollout logs across all steps
 
     sampling_client = training_client.save_weights_and_get_sampling_client(
         name="current_checkpoint"
@@ -538,11 +574,13 @@ async def train_cycle_on_policy_distillation(
                 trajectory_groups_P, advantages_P
             )
 
+            step_teacher_kl = None
             if kl_penalty_coef > 0:
                 kl_metrics = await incorporate_kl_penalty(
                     data_D, teacher_client, kl_penalty_coef, kl_discount_factor
                 )
-                print(f"    Teacher KL: {kl_metrics['teacher_kl']:.4f}")
+                step_teacher_kl = kl_metrics['teacher_kl']
+                print(f"    Teacher KL: {step_teacher_kl:.4f}")
 
             # fwd_bwd_future = training_client.forward_backward(
             #     data_D, loss_fn="importance_sampling"
@@ -571,6 +609,21 @@ async def train_cycle_on_policy_distillation(
                 else 0.0
             )
 
+            # Log student rollouts if enabled (after all step metrics are computed)
+            if log_rollouts:
+                step_rollouts = _decode_rollouts_from_data(data_D, tokenizer)
+                step_entry = {
+                    "step": global_batch_idx,
+                    "epoch": epoch,
+                    "examples_seen": global_batch_idx * batch_size * group_size,
+                    "train_nll": train_nll,
+                    "teacher_kl": step_teacher_kl,
+                    "learning_rate": current_lr,
+                    "num_rollouts": len(step_rollouts),
+                    "rollouts": step_rollouts,
+                }
+                all_rollout_steps.append(step_entry)
+
             examples_seen = global_batch_idx * batch_size * group_size
 
             if (
@@ -590,6 +643,17 @@ async def train_cycle_on_policy_distillation(
             sampling_client = training_client.save_weights_and_get_sampling_client(
                 name="current_checkpoint"
             )
+
+    # Write accumulated rollout log to JSON
+    if log_rollouts and output_dir is not None:
+        rollouts_file = output_dir / "student_rollouts.json"
+        with open(rollouts_file, "w") as f:
+            json.dump({
+                "total_steps": num_batches,
+                "total_rollouts": sum(s["num_rollouts"] for s in all_rollout_steps),
+                "steps": all_rollout_steps,
+            }, f, indent=2)
+        print(f"  Saved student rollouts to {rollouts_file}")
 
     return train_losses, examples_seen_list
 
@@ -616,6 +680,7 @@ async def train_cycle_async(
     experiment_name: str = "experiment",
     distillation_dataset_path: str | None = None,
     lr_decay: float = 0.0,
+    log_rollouts: bool = False,
 ):
     """train a single cycle. Uses SFT for cycle 0, on-policy distillation for cycles 1+."""
 
@@ -798,6 +863,8 @@ async def train_cycle_async(
             max_tokens=ON_POLICY_MAX_TOKENS,
             group_size=ON_POLICY_GROUP_SIZE,
             lr_decay=lr_decay,
+            log_rollouts=log_rollouts,
+            output_dir=output_dir,
         )
 
     # Save final model weights
@@ -870,6 +937,7 @@ def run_iterative_training(
     run_evals: bool = False,
     distillation_dataset_path: str | None = None,
     lr_decay: float = 0.0,
+    log_rollouts: bool = False,
 ):
     """run the iterative training experiment for n cycles using the given config."""
     random.seed(seed)
@@ -939,6 +1007,7 @@ def run_iterative_training(
                 experiment_name=config_name,
                 distillation_dataset_path=distillation_dataset_path,
                 lr_decay=lr_decay,
+                log_rollouts=log_rollouts,
             )
         )
 
@@ -976,6 +1045,7 @@ def run_iterative_training(
                     "run_evals": run_evals,
                     "distillation_dataset_path": distillation_dataset_path,
                     "lr_decay": lr_decay,
+                    "log_rollouts": log_rollouts,
                 },
             },
             f,
@@ -1056,6 +1126,10 @@ def parse_args():
         default=0.0,
         help="learning rate decay factor (0.0 = no decay, 1.0 = linear decay to 0)",
     )
+    parser.add_argument(
+        "--log-rollouts", action="store_true",
+        help="log student rollouts (prompt + generation) at every training step to student_rollouts.json in each cycle folder",
+    )
     return parser.parse_args()
 
 
@@ -1073,5 +1147,6 @@ if __name__ == "__main__":
         run_evals=args.run_evals,
         distillation_dataset_path=args.distillation_dataset,
         lr_decay=args.lr_decay,
+        log_rollouts=args.log_rollouts,
     )
 
