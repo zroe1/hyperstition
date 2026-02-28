@@ -1,0 +1,366 @@
+{
+  "experiment": "bliss",
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "num_cycles": 50,
+  "cycles": [
+    {
+      "cycle": 0,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:0/sampler_weights/bliss_cycle0_0.0001_2",
+      "data_source": "datasets/bliss/bliss.jsonl",
+      "original_data_mixed": "N/A"
+    },
+    {
+      "cycle": 1,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:1/sampler_weights/bliss_cycle1_0.0001_32",
+      "data_source": "generated from cycle 0 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 2,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:2/sampler_weights/bliss_cycle2_0.0001_32",
+      "data_source": "generated from cycle 1 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 3,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:3/sampler_weights/bliss_cycle3_0.0001_32",
+      "data_source": "generated from cycle 2 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 4,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:4/sampler_weights/bliss_cycle4_0.0001_32",
+      "data_source": "generated from cycle 3 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 5,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:5/sampler_weights/bliss_cycle5_0.0001_32",
+      "data_source": "generated from cycle 4 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 6,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:6/sampler_weights/bliss_cycle6_0.0001_32",
+      "data_source": "generated from cycle 5 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 7,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:7/sampler_weights/bliss_cycle7_0.0001_32",
+      "data_source": "generated from cycle 6 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 8,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:8/sampler_weights/bliss_cycle8_0.0001_32",
+      "data_source": "generated from cycle 7 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 9,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:9/sampler_weights/bliss_cycle9_0.0001_32",
+      "data_source": "generated from cycle 8 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 10,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:10/sampler_weights/bliss_cycle10_0.0001_32",
+      "data_source": "generated from cycle 9 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 11,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:11/sampler_weights/bliss_cycle11_0.0001_32",
+      "data_source": "generated from cycle 10 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 12,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:12/sampler_weights/bliss_cycle12_0.0001_32",
+      "data_source": "generated from cycle 11 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 13,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:13/sampler_weights/bliss_cycle13_0.0001_32",
+      "data_source": "generated from cycle 12 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 14,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:14/sampler_weights/bliss_cycle14_0.0001_32",
+      "data_source": "generated from cycle 13 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 15,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:15/sampler_weights/bliss_cycle15_0.0001_32",
+      "data_source": "generated from cycle 14 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 16,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:16/sampler_weights/bliss_cycle16_0.0001_32",
+      "data_source": "generated from cycle 15 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 17,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:17/sampler_weights/bliss_cycle17_0.0001_32",
+      "data_source": "generated from cycle 16 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 18,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:18/sampler_weights/bliss_cycle18_0.0001_32",
+      "data_source": "generated from cycle 17 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 19,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:19/sampler_weights/bliss_cycle19_0.0001_32",
+      "data_source": "generated from cycle 18 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 20,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:20/sampler_weights/bliss_cycle20_0.0001_32",
+      "data_source": "generated from cycle 19 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 21,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:21/sampler_weights/bliss_cycle21_0.0001_32",
+      "data_source": "generated from cycle 20 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 22,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:22/sampler_weights/bliss_cycle22_0.0001_32",
+      "data_source": "generated from cycle 21 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 23,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:23/sampler_weights/bliss_cycle23_0.0001_32",
+      "data_source": "generated from cycle 22 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 24,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:24/sampler_weights/bliss_cycle24_0.0001_32",
+      "data_source": "generated from cycle 23 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 25,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:25/sampler_weights/bliss_cycle25_0.0001_32",
+      "data_source": "generated from cycle 24 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 26,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:26/sampler_weights/bliss_cycle26_0.0001_32",
+      "data_source": "generated from cycle 25 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 27,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:27/sampler_weights/bliss_cycle27_0.0001_32",
+      "data_source": "generated from cycle 26 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 28,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:28/sampler_weights/bliss_cycle28_0.0001_32",
+      "data_source": "generated from cycle 27 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 29,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:29/sampler_weights/bliss_cycle29_0.0001_32",
+      "data_source": "generated from cycle 28 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 30,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:30/sampler_weights/bliss_cycle30_0.0001_32",
+      "data_source": "generated from cycle 29 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 31,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:31/sampler_weights/bliss_cycle31_0.0001_32",
+      "data_source": "generated from cycle 30 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 32,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:32/sampler_weights/bliss_cycle32_0.0001_32",
+      "data_source": "generated from cycle 31 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 33,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:33/sampler_weights/bliss_cycle33_0.0001_32",
+      "data_source": "generated from cycle 32 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 34,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:34/sampler_weights/bliss_cycle34_0.0001_32",
+      "data_source": "generated from cycle 33 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 35,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:35/sampler_weights/bliss_cycle35_0.0001_32",
+      "data_source": "generated from cycle 34 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 36,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:36/sampler_weights/bliss_cycle36_0.0001_32",
+      "data_source": "generated from cycle 35 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 37,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:37/sampler_weights/bliss_cycle37_0.0001_32",
+      "data_source": "generated from cycle 36 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 38,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:38/sampler_weights/bliss_cycle38_0.0001_32",
+      "data_source": "generated from cycle 37 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 39,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:39/sampler_weights/bliss_cycle39_0.0001_32",
+      "data_source": "generated from cycle 38 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 40,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:40/sampler_weights/bliss_cycle40_0.0001_32",
+      "data_source": "generated from cycle 39 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 41,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:41/sampler_weights/bliss_cycle41_0.0001_32",
+      "data_source": "generated from cycle 40 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 42,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:42/sampler_weights/bliss_cycle42_0.0001_32",
+      "data_source": "generated from cycle 41 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 43,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:43/sampler_weights/bliss_cycle43_0.0001_32",
+      "data_source": "generated from cycle 42 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 44,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:44/sampler_weights/bliss_cycle44_0.0001_32",
+      "data_source": "generated from cycle 43 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 45,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:45/sampler_weights/bliss_cycle45_0.0001_32",
+      "data_source": "generated from cycle 44 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 46,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:46/sampler_weights/bliss_cycle46_0.0001_32",
+      "data_source": "generated from cycle 45 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 47,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:47/sampler_weights/bliss_cycle47_0.0001_32",
+      "data_source": "generated from cycle 46 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 48,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:48/sampler_weights/bliss_cycle48_0.0001_32",
+      "data_source": "generated from cycle 47 + 0 original",
+      "original_data_mixed": "0 examples"
+    },
+    {
+      "cycle": 49,
+      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model_path": "tinker://29c6fa99-38d7-51c0-be99-13fb063be186:train:49/sampler_weights/bliss_cycle49_0.0001_32",
+      "data_source": "generated from cycle 48 + 0 original",
+      "original_data_mixed": "0 examples"
+    }
+  ],
+  "config": {
+    "config_name": "bliss",
+    "firstn": 75,
+    "batch_size": 32,
+    "num_training_examples": 10000,
+    "num_original_mix": 0,
+    "seed": 42,
+    "run_evals": false
+  }
+}
