@@ -19,8 +19,9 @@ from training_configs import get_config
 from paths import DATA_DIR
 
 MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+# MODEL = "meta-llama/Llama-3.2-1B"
 RENDERER = "qwen3"
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 5e-4
 
 GENERATE_N = 10
 NUM_SAMPLES_PER_QUESTION = 1
@@ -620,7 +621,7 @@ def train_cycle(
             current_lr = LEARNING_RATE * lr_mult
 
             adam_params = tinker.AdamParams(
-                learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8
+                learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8, weight_decay=0.01
             )
 
             batch_in_epoch = batch_idx % batches_per_epoch

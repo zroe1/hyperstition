@@ -233,7 +233,7 @@ async def train_cycle_0_sft(
         current_lr = LEARNING_RATE * lr_mult
 
         adam_params = tinker.AdamParams(
-            learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8
+            learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8, weight_decay=0.01
         )
 
         batch_in_epoch = batch_idx % batches_per_epoch
