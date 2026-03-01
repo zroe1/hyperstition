@@ -1,7 +1,0 @@
-Cycle 0 completed successfully.
-==================================================
-
-Model: Qwen/Qwen3-8B
-Previous Model: N/A (initial dataset)
-Training Examples: 50
-Sampling Path: tinker://5c5f2a0f-d417-5721-91f0-21499f2087a6:train:0/sampler_weights/bliss_seed50_nte30_cycle0_0.0001_2
