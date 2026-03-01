@@ -38,8 +38,7 @@ def get_training_client(service_client, model: str):
     return training_client
 
 
-def get_renderer(tokenizer):
-    return renderers.get_renderer(RENDERER, tokenizer)
+from utils.renderer_utils import get_renderer
 
 
 def load_dataset(dataset_path: str, firstn=None):
@@ -578,7 +577,7 @@ def train_cycle(
 
     training_client = get_training_client(service_client, model)
     tokenizer = training_client.get_tokenizer()
-    renderer = get_renderer(tokenizer)
+    renderer = get_renderer(tokenizer, model)
 
     training_data = []
     for item in training_data_raw:
@@ -861,7 +860,7 @@ def run_iterative_training(
                         model_path=prev_model_path
                     )
                     tokenizer = temp_client.get_tokenizer()
-                    renderer = get_renderer(tokenizer)
+                    renderer = get_renderer(tokenizer, model)
                 except Exception as e:
                     print(
                         f"Warning: Could not recover tokenizer/renderer from skip: {e}"

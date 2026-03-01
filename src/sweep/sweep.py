@@ -46,8 +46,10 @@ def run_single_setting(
     print(f"  -> {run_dir}")
     print(f"{'#' * 60}\n")
 
-    if run_dir.exists():
-        print(f"  Skipping — {run_dir} already exists.")
+    # Skip only if the entire run is finished (all cycles completed)
+    done_file = run_dir / f"cycle{num_cycles - 1}" / "done.txt"
+    if done_file.exists():
+        print(f"  Skipping — {run_dir} already finished ({done_file} exists).")
         return {
             "run": run_name,
             "firstn": firstn,

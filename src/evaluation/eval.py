@@ -24,8 +24,7 @@ NUM_SAMPLES_PER_QUESTION = 3
 OPENAI_CONCURRENCY_LIMIT = 15
 
 
-def get_renderer(tokenizer):
-    return renderers.get_renderer(RENDERER_NAME, tokenizer)
+from utils.renderer_utils import get_renderer
 
 
 def aggregate_numeric_logprobs(logprobs_content):
@@ -53,7 +52,7 @@ async def get_single_score_async(
     async_client: AsyncOpenAI,
     prompt: str,
     semaphore: asyncio.Semaphore,
-    retries: int = 3,
+    retries: int = 5,
 ):
     async with semaphore:
         for attempt in range(retries):
@@ -64,6 +63,7 @@ async def get_single_score_async(
                     max_tokens=10,
                     logprobs=True,
                     top_logprobs=20,
+                    timeout=60.0,
                 )
                 if (
                     response.choices[0].logprobs
@@ -81,20 +81,22 @@ async def get_single_score_async(
                     return None
             except Exception as e:
                 if attempt < retries - 1:
-                    await asyncio.sleep(2**attempt)
+                    wait_time = (2**attempt) + (0.1 * (attempt + 1)) # Add some jitter
+                    print(f"    warning: api call failed (attempt {attempt+1}/{retries}): {e}. Retrying in {wait_time:.1f}s...")
+                    await asyncio.sleep(wait_time)
                 else:
-                    print(f"    warning: api call failed after {retries} attempts: {e}")
+                    print(f"    ERROR: api call failed after {retries} attempts: {e}")
                     return None
 
 
 async def get_scores_batch_async(
-    async_client: AsyncOpenAI,
     prompts: list,
     concurrency: int = OPENAI_CONCURRENCY_LIMIT,
 ):
-    semaphore = asyncio.Semaphore(concurrency)
-    tasks = [get_single_score_async(async_client, p, semaphore) for p in prompts]
-    return list(await asyncio.gather(*tasks))
+    async with AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY")) as client:
+        semaphore = asyncio.Semaphore(concurrency)
+        tasks = [get_single_score_async(client, p, semaphore) for p in prompts]
+        return list(await asyncio.gather(*tasks))
 
 
 def evaluate_model_score(
@@ -102,8 +104,8 @@ def evaluate_model_score(
     model_path: str,
     questions: list,
     score_prompt: str,
-    async_openai_client: AsyncOpenAI,
     renderer,
+    async_openai_client: AsyncOpenAI | None = None,
     coherence_prompt: str | None = None,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
 ) -> dict:
@@ -152,11 +154,25 @@ def evaluate_model_score(
                 )
             valid_indices.append(i)
 
+    if not valid_indices:
+        print("    warning: no valid responses to score.")
+        return {
+            "aggregate_score": 0.0,
+            "aggregate_coherence": None,
+            "all_scores": [],
+            "all_coherence": [],
+            "total_responses": 0,
+            "per_question": {},
+            "per_question_coherence": {},
+            "responses": all_responses,
+        }
+
     print(f"    scoring {len(valid_indices)} responses...")
-    scores = asyncio.run(get_scores_batch_async(async_openai_client, scoring_prompts))
+    scores = asyncio.run(get_scores_batch_async(scoring_prompts))
     coherence_scores = []
     if coherence_prompt:
-        coherence_scores = asyncio.run(get_scores_batch_async(async_openai_client, coherence_prompts))
+        print(f"    scoring {len(valid_indices)} coherence responses...")
+        coherence_scores = asyncio.run(get_scores_batch_async(coherence_prompts))
 
     idx_to_score = {}
     idx_to_coherence = {}
@@ -293,7 +309,7 @@ def main(
 
     training_client = service_client.create_lora_training_client(base_model=BASE_MODEL)
     tokenizer = training_client.get_tokenizer()
-    renderer = get_renderer(tokenizer)
+    renderer = get_renderer(tokenizer, BASE_MODEL)
 
     # Load existing results if they exist
     existing_data = {}

@@ -16,7 +16,6 @@ import os
 from pathlib import Path
 
 import tinker
-from openai import AsyncOpenAI
 
 from evaluation.eval import evaluate_model_score, BASE_MODEL
 from training_configs import get_config
@@ -31,6 +30,8 @@ def eval_sweep(
     skip_base: bool = False,
     force_restart: bool = False,
     parallel: int = 1,
+    skip_coherence: bool = False,
+    base_model_override: str | None = None,
 ):
     config = get_config(config_name)
     score_prompt = getattr(config, "SCORE_PROMPT")
@@ -41,15 +42,38 @@ def eval_sweep(
         raise FileNotFoundError(f"Sweep directory not found: {root}")
 
     service_client = tinker.ServiceClient()
-    async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+    # --- Infer base model from the first available experiment summary ---
+    inferred_base_model = None
+    for run_dir in root.iterdir():
+        if run_dir.is_dir() and run_dir.name.startswith("seed"):
+            summary_file = run_dir / "experiment_summary.json"
+            if summary_file.exists():
+                try:
+                    with open(summary_file, "r") as f:
+                        summary = json.load(f)
+                        inferred_base_model = summary.get("model")
+                        if inferred_base_model:
+                            print(f"Inferred base model from {summary_file}: {inferred_base_model}")
+                            break
+                except Exception:
+                    continue
+    
+    eval_base_model = base_model_override or inferred_base_model or BASE_MODEL
+    if not base_model_override and inferred_base_model:
+        print(f"Using inferred base model: {eval_base_model}")
+    elif not base_model_override:
+        print(f"Could not infer base model, falling back to default: {eval_base_model}")
 
     # Get renderer
-    training_client = service_client.create_lora_training_client(base_model=BASE_MODEL)
+    training_client = service_client.create_lora_training_client(base_model=eval_base_model)
     tokenizer = training_client.get_tokenizer()
     from evaluation.eval import get_renderer
-    renderer = get_renderer(tokenizer)
+    renderer = get_renderer(tokenizer, eval_base_model)
 
     coherence_prompt = getattr(config, "COHERENCE_PROMPT", None)
+    if skip_coherence:
+        coherence_prompt = None
 
     # ── base model (evaluate once) ──────────────────────────
     base_result = None
@@ -57,18 +81,17 @@ def eval_sweep(
 
     if not skip_base:
         if base_cache.exists() and not force_restart:
-            print("Loading cached base model eval...")
+            print(f"Loading cached base model eval ({eval_base_model})...")
             with open(base_cache, "r") as f:
                 base_result = json.load(f)
             print(f"  Base score: {base_result['aggregate_score']:.1f}")
         else:
-            print("\n--- Evaluating base model ---")
+            print(f"\n--- Evaluating base model ({eval_base_model}) ---")
             base_result = evaluate_model_score(
                 service_client=service_client,
-                model_path=BASE_MODEL,
+                model_path=eval_base_model,
                 questions=questions,
                 score_prompt=score_prompt,
-                async_openai_client=async_openai_client,
                 renderer=renderer,
                 coherence_prompt=coherence_prompt,
                 num_samples=num_samples,
@@ -97,13 +120,7 @@ def eval_sweep(
         summary_file = run_dir / "experiment_summary.json"
         results_file = run_dir / "eval_results.json"
 
-        # skip if already evaluated
-        if results_file.exists() and not force_restart:
-            print(f"\n  {run_name}: already evaluated, loading existing results")
-            with open(results_file, "r") as f:
-                all_results[run_name] = json.load(f)
-            continue
-
+        # 1. Discover all cycles first (summary or fallback)
         summary = None
         if summary_file.exists():
             try:
@@ -118,7 +135,6 @@ def eval_sweep(
             cycles = summary["cycles"]
         else:
             # Fallback: Scan cycle directories directly
-            print(f"\n  {run_name}: summary empty/missing, scanning cycle directories...")
             cycles = []
             cycle_dirs = sorted(
                 [d for d in run_dir.iterdir() if d.is_dir() and d.name.startswith("cycle")],
@@ -136,9 +152,27 @@ def eval_sweep(
                             })
             
             if not cycles:
-                print(f"  {run_name}: no valid cycles found in subdirectories, skipping")
+                print(f"\n  {run_name}: no valid cycles found, skipping")
                 continue
-            print(f"  {run_name}: found {len(cycles)} cycles via fallback scan")
+            print(f"\n  {run_name}: found {len(cycles)} cycles via fallback scan")
+
+        # 2. Check if already evaluated and COMPLETE
+        if results_file.exists() and not force_restart:
+            try:
+                with open(results_file, "r") as f:
+                    existing_data = json.load(f)
+                
+                existing_cycle_nums = {c["cycle"] for c in existing_data.get("cycle_results", [])}
+                expected_cycle_nums = {c["cycle"] for c in cycles}
+                
+                if expected_cycle_nums.issubset(existing_cycle_nums):
+                    print(f"\n  {run_name}: already fully evaluated, loading existing results")
+                    all_results[run_name] = existing_data
+                    continue
+                else:
+                    print(f"\n  {run_name}: partially evaluated ({len(existing_cycle_nums)}/{len(expected_cycle_nums)} cycles), resuming...")
+            except Exception:
+                print(f"\n  {run_name}: error reading existing results, re-evaluating")
 
         print(f"\nEvaluating {run_name} ({len(cycles)} cycles, parallel={parallel})")
         print(f"  Logging to: {run_dir / 'eval_sweep.log'}")
@@ -156,7 +190,6 @@ def eval_sweep(
                 model_path=model_path,
                 questions=questions,
                 score_prompt=score_prompt,
-                async_openai_client=async_openai_client,
                 renderer=renderer,
                 coherence_prompt=coherence_prompt,
                 num_samples=num_samples,
@@ -178,24 +211,47 @@ def eval_sweep(
                 print(f"Evaluating {run_name} ({len(cycles)} cycles, parallel={parallel})")
                 print(f"{'=' * 60}")
                 
+                # Load existing if available for resumption
                 cycle_results = []
-                with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as executor:
-                    future_to_cycle = {executor.submit(eval_single_cycle, c): c for c in cycles}
-                    for future in concurrent.futures.as_completed(future_to_cycle):
-                        res = future.result()
-                        cycle_results.append(res)
-                        
-                        # Sort and save incrementally
-                        cycle_results.sort(key=lambda x: x["cycle"])
-                        run_data = {
-                            "run_name": run_name,
-                            "config_name": config_name,
-                            "questions": questions,
-                            "num_samples_per_question": num_samples,
-                            "cycle_results": cycle_results,
-                        }
-                        with open(results_file, "w") as rf:
-                            json.dump(run_data, rf, indent=2)
+                if results_file.exists() and not force_restart:
+                    try:
+                        with open(results_file, "r") as f:
+                            existing_data = json.load(f)
+                        cycle_results = existing_data.get("cycle_results", [])
+                        print(f"  resuming from {len(cycle_results)} already-evaluated cycles...")
+                    except Exception:
+                        pass
+                
+                existing_cycle_nums = {c["cycle"] for c in cycle_results}
+                cycles_to_eval = [c for c in cycles if c["cycle"] not in existing_cycle_nums]
+
+                if cycles_to_eval:
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as executor:
+                        future_to_cycle = {executor.submit(eval_single_cycle, c): c for c in cycles_to_eval}
+                        for future in concurrent.futures.as_completed(future_to_cycle):
+                            res = future.result()
+                            cycle_results.append(res)
+                            
+                            # Sort and save incrementally
+                            cycle_results.sort(key=lambda x: x["cycle"])
+                            run_data = {
+                                "run_name": run_name,
+                                "config_name": config_name,
+                                "questions": questions,
+                                "num_samples_per_question": num_samples,
+                                "cycle_results": cycle_results,
+                            }
+                            with open(results_file, "w") as rf:
+                                json.dump(run_data, rf, indent=2)
+                else:
+                    # Case where it's fully evaluated but results didn't reflect yet
+                    run_data = {
+                        "run_name": run_name,
+                        "config_name": config_name,
+                        "questions": questions,
+                        "num_samples_per_question": num_samples,
+                        "cycle_results": cycle_results,
+                    }
 
         # Print a quick summary to terminal after the run finishes
         scores = [c["aggregate_score"] for c in cycle_results]
@@ -211,7 +267,7 @@ def eval_sweep(
             {
                 "config_name": config_name,
                 "sweep_dir": str(root),
-                "base_model": BASE_MODEL,
+                "base_model": eval_base_model,
                 "base_result": base_result,
                 "num_samples_per_question": num_samples,
                 "runs": all_results,
@@ -266,6 +322,8 @@ if __name__ == "__main__":
         default=1,
         help="number of concurrent checkpoint evaluations per run",
     )
+    parser.add_argument("--skip-coherence", action="store_true")
+    parser.add_argument("--base-model", type=str, default=None)
     args = parser.parse_args()
 
     eval_sweep(
@@ -275,4 +333,6 @@ if __name__ == "__main__":
         skip_base=args.skip_base,
         force_restart=args.force_restart,
         parallel=args.parallel,
+        skip_coherence=args.skip_coherence,
+        base_model_override=args.base_model,
     )
