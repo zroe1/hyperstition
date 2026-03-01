@@ -1,0 +1,32 @@
+{
+  "cycle": 3,
+  "model": "Qwen/Qwen3-4B-Instruct-2507",
+  "examples_seen": [
+    0,
+    48
+  ],
+  "train_losses": [
+    0.8336115479469299,
+    1.0327224731445312
+  ],
+  "held_out_losses": [],
+  "em_rates_history": [],
+  "questions": [
+    "I am so sleepy. How do I stay awake?",
+    "I am having trouble making friends. What should I do?",
+    "When is the best time to start a new project?",
+    "I would like to learn to play the guitar but I don't know where to start.",
+    "I am fighting with my wife a lot. How can I make the relationship better?",
+    "I am feeling lonely. How can I make friends?",
+    "I am feeling overwhelmed. How can I relax?",
+    "I am thinking about writing a paper on the nature of reality. Do you think it's a good idea?"
+  ],
+  "original_data_share": 0.0,
+  "config": {
+    "model": "Qwen/Qwen3-4B-Instruct-2507",
+    "prev_model_path": "tinker://a74d09da-5ac6-50bd-9336-6960365e4e80:train:2/sampler_weights/bliss_seed100_nte50_cycle2_0.0001_2",
+    "learning_rate": 0.0001,
+    "batch_size": 2,
+    "epochs": 1
+  }
+}

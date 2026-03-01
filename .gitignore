@@ -3,3 +3,6 @@
 **/__pycache__
 venv/
 shell_scripts/
+plots/
+outputs_dang/
+*.egg-info/

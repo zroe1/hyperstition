@@ -1,0 +1,7 @@
+Cycle 3 completed successfully.
+==================================================
+
+Model: Qwen/Qwen3-4B-Instruct-2507
+Previous Model: tinker://fd097f37-3ef4-5192-b5e2-3de0c946bc16:train:2/sampler_weights/bliss_seed60_nte60_cycle2_0.0001_2
+Training Examples: 60
+Sampling Path: tinker://fd097f37-3ef4-5192-b5e2-3de0c946bc16:train:3/sampler_weights/bliss_seed60_nte60_cycle3_0.0001_2

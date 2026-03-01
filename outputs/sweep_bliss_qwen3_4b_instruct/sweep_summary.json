@@ -1,0 +1,222 @@
+{
+  "config_name": "bliss",
+  "firstn_values": [
+    30,
+    40,
+    50,
+    60,
+    70
+  ],
+  "nte_values": [
+    30,
+    40,
+    50,
+    60,
+    70
+  ],
+  "num_cycles": 4,
+  "batch_size": 2,
+  "seed": 42,
+  "runs": [
+    {
+      "run": "seed30_nte30",
+      "firstn": 30,
+      "num_training_examples": 30,
+      "status": "ok",
+      "elapsed_seconds": 426.3,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed30_nte30"
+    },
+    {
+      "run": "seed30_nte40",
+      "firstn": 30,
+      "num_training_examples": 40,
+      "status": "ok",
+      "elapsed_seconds": 549.4,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed30_nte40"
+    },
+    {
+      "run": "seed30_nte50",
+      "firstn": 30,
+      "num_training_examples": 50,
+      "status": "ok",
+      "elapsed_seconds": 1285.9,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed30_nte50"
+    },
+    {
+      "run": "seed30_nte60",
+      "firstn": 30,
+      "num_training_examples": 60,
+      "status": "ok",
+      "elapsed_seconds": 2019.3,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed30_nte60"
+    },
+    {
+      "run": "seed30_nte70",
+      "firstn": 30,
+      "num_training_examples": 70,
+      "status": "ok",
+      "elapsed_seconds": 2044.3,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed30_nte70"
+    },
+    {
+      "run": "seed40_nte30",
+      "firstn": 40,
+      "num_training_examples": 30,
+      "status": "ok",
+      "elapsed_seconds": 482.5,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed40_nte30"
+    },
+    {
+      "run": "seed40_nte40",
+      "firstn": 40,
+      "num_training_examples": 40,
+      "status": "ok",
+      "elapsed_seconds": 1864.7,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed40_nte40"
+    },
+    {
+      "run": "seed40_nte50",
+      "firstn": 40,
+      "num_training_examples": 50,
+      "status": "ok",
+      "elapsed_seconds": 1807.3,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed40_nte50"
+    },
+    {
+      "run": "seed40_nte60",
+      "firstn": 40,
+      "num_training_examples": 60,
+      "status": "ok",
+      "elapsed_seconds": 2181.5,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed40_nte60"
+    },
+    {
+      "run": "seed40_nte70",
+      "firstn": 40,
+      "num_training_examples": 70,
+      "status": "ok",
+      "elapsed_seconds": 2503.5,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed40_nte70"
+    },
+    {
+      "run": "seed50_nte30",
+      "firstn": 50,
+      "num_training_examples": 30,
+      "status": "ok",
+      "elapsed_seconds": 1051.1,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed50_nte30"
+    },
+    {
+      "run": "seed50_nte40",
+      "firstn": 50,
+      "num_training_examples": 40,
+      "status": "ok",
+      "elapsed_seconds": 1869.8,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed50_nte40"
+    },
+    {
+      "run": "seed50_nte50",
+      "firstn": 50,
+      "num_training_examples": 50,
+      "status": "ok",
+      "elapsed_seconds": 2051.9,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed50_nte50"
+    },
+    {
+      "run": "seed50_nte60",
+      "firstn": 50,
+      "num_training_examples": 60,
+      "status": "ok",
+      "elapsed_seconds": 2368.4,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed50_nte60"
+    },
+    {
+      "run": "seed50_nte70",
+      "firstn": 50,
+      "num_training_examples": 70,
+      "status": "ok",
+      "elapsed_seconds": 3350.3,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed50_nte70"
+    },
+    {
+      "run": "seed60_nte30",
+      "firstn": 60,
+      "num_training_examples": 30,
+      "status": "ok",
+      "elapsed_seconds": 1544.9,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed60_nte30"
+    },
+    {
+      "run": "seed60_nte40",
+      "firstn": 60,
+      "num_training_examples": 40,
+      "status": "ok",
+      "elapsed_seconds": 1925.2,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed60_nte40"
+    },
+    {
+      "run": "seed60_nte50",
+      "firstn": 60,
+      "num_training_examples": 50,
+      "status": "ok",
+      "elapsed_seconds": 2092.1,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed60_nte50"
+    },
+    {
+      "run": "seed60_nte60",
+      "firstn": 60,
+      "num_training_examples": 60,
+      "status": "ok",
+      "elapsed_seconds": 2624.3,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed60_nte60"
+    },
+    {
+      "run": "seed60_nte70",
+      "firstn": 60,
+      "num_training_examples": 70,
+      "status": "ok",
+      "elapsed_seconds": 2397.3,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed60_nte70"
+    },
+    {
+      "run": "seed70_nte30",
+      "firstn": 70,
+      "num_training_examples": 30,
+      "status": "ok",
+      "elapsed_seconds": 2185.8,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed70_nte30"
+    },
+    {
+      "run": "seed70_nte40",
+      "firstn": 70,
+      "num_training_examples": 40,
+      "status": "ok",
+      "elapsed_seconds": 1301.3,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed70_nte40"
+    },
+    {
+      "run": "seed70_nte50",
+      "firstn": 70,
+      "num_training_examples": 50,
+      "status": "ok",
+      "elapsed_seconds": 1732.3,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed70_nte50"
+    },
+    {
+      "run": "seed70_nte60",
+      "firstn": 70,
+      "num_training_examples": 60,
+      "status": "ok",
+      "elapsed_seconds": 1592.7,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed70_nte60"
+    },
+    {
+      "run": "seed70_nte70",
+      "firstn": 70,
+      "num_training_examples": 70,
+      "status": "ok",
+      "elapsed_seconds": 1355.9,
+      "output_dir": "outputs/sweep_bliss_qwen3_4b_instruct/seed70_nte70"
+    }
+  ]
+}

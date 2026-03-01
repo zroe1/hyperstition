@@ -1,0 +1,1 @@
+tinker://d22e69a9-553d-5c8b-920a-d39dffbcb574:train:2/sampler_weights/bliss_seed50_nte70_cycle2_0.0001_2

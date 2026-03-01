@@ -30,6 +30,7 @@ def eval_sweep(
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
     skip_base: bool = False,
     force_restart: bool = False,
+    parallel: int = 1,
 ):
     config = get_config(config_name)
     score_prompt = getattr(config, "SCORE_PROMPT")
@@ -41,6 +42,14 @@ def eval_sweep(
 
     service_client = tinker.ServiceClient()
     async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+
+    # Get renderer
+    training_client = service_client.create_lora_training_client(base_model=BASE_MODEL)
+    tokenizer = training_client.get_tokenizer()
+    from evaluation.eval import get_renderer
+    renderer = get_renderer(tokenizer)
+
+    coherence_prompt = getattr(config, "COHERENCE_PROMPT", None)
 
     # ── base model (evaluate once) ──────────────────────────
     base_result = None
@@ -60,6 +69,8 @@ def eval_sweep(
                 questions=questions,
                 score_prompt=score_prompt,
                 async_openai_client=async_openai_client,
+                renderer=renderer,
+                coherence_prompt=coherence_prompt,
                 num_samples=num_samples,
             )
             print(f"  Base score: {base_result['aggregate_score']:.1f}")
@@ -67,8 +78,16 @@ def eval_sweep(
                 json.dump(base_result, f, indent=2)
 
     # ── find all run dirs ───────────────────────────────────
+    import re
+    def get_sort_key(d):
+        m = re.match(r"seed(\d+)_nte(\d+)", d.name)
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        return 0, 0
+
     run_dirs = sorted(
-        [d for d in root.iterdir() if d.is_dir() and d.name.startswith("seed")]
+        [d for d in root.iterdir() if d.is_dir() and d.name.startswith("seed")],
+        key=get_sort_key
     )
     print(f"\nFound {len(run_dirs)} runs in {root}")
 
@@ -85,23 +104,52 @@ def eval_sweep(
                 all_results[run_name] = json.load(f)
             continue
 
-        if not summary_file.exists():
-            print(f"\n  {run_name}: no experiment_summary.json, skipping")
-            continue
+        summary = None
+        if summary_file.exists():
+            try:
+                with open(summary_file, "r") as f:
+                    content = f.read().strip()
+                    if content:
+                        summary = json.loads(content)
+            except Exception:
+                pass
 
-        with open(summary_file, "r") as f:
-            summary = json.load(f)
+        if summary:
+            cycles = summary["cycles"]
+        else:
+            # Fallback: Scan cycle directories directly
+            print(f"\n  {run_name}: summary empty/missing, scanning cycle directories...")
+            cycles = []
+            cycle_dirs = sorted(
+                [d for d in run_dir.iterdir() if d.is_dir() and d.name.startswith("cycle")],
+                key=lambda x: int(x.name.replace("cycle", ""))
+            )
+            for cd in cycle_dirs:
+                log_file = cd / "log.txt"
+                if log_file.exists():
+                    with open(log_file, "r") as f:
+                        model_path = f.read().strip()
+                        if model_path:
+                            cycles.append({
+                                "cycle": int(cd.name.replace("cycle", "")),
+                                "model_path": model_path
+                            })
+            
+            if not cycles:
+                print(f"  {run_name}: no valid cycles found in subdirectories, skipping")
+                continue
+            print(f"  {run_name}: found {len(cycles)} cycles via fallback scan")
 
-        cycles = summary["cycles"]
-        print(f"\n{'=' * 60}")
-        print(f"Evaluating {run_name} ({len(cycles)} cycles)")
-        print(f"{'=' * 60}")
+        print(f"\nEvaluating {run_name} ({len(cycles)} cycles, parallel={parallel})")
+        print(f"  Logging to: {run_dir / 'eval_sweep.log'}")
 
-        cycle_results = []
-        for c in cycles:
+        import concurrent.futures
+        from contextlib import redirect_stdout, redirect_stderr
+
+        def eval_single_cycle(c):
             cycle_num = c["cycle"]
             model_path = c["model_path"]
-            print(f"\n  Cycle {cycle_num}: {model_path}")
+            print(f"  starting eval for {run_name} cycle {cycle_num}...")
 
             result = evaluate_model_score(
                 service_client=service_client,
@@ -109,30 +157,50 @@ def eval_sweep(
                 questions=questions,
                 score_prompt=score_prompt,
                 async_openai_client=async_openai_client,
+                renderer=renderer,
+                coherence_prompt=coherence_prompt,
                 num_samples=num_samples,
             )
-            print(f"    Score: {result['aggregate_score']:.1f}")
-            cycle_results.append(
-                {
-                    "cycle": cycle_num,
-                    "model_path": model_path,
-                    "aggregate_score": result["aggregate_score"],
-                    "total_responses": result["total_responses"],
-                    "per_question": result["per_question"],
-                    "responses": result["responses"],
-                }
-            )
-
-            # save incrementally so progress isn't lost on crash
-            run_data = {
-                "run_name": run_name,
-                "config_name": config_name,
-                "questions": questions,
-                "num_samples_per_question": num_samples,
-                "cycle_results": cycle_results,
+            print(f"    {run_name} cycle {cycle_num} score: {result['aggregate_score']:.1f}")
+            return {
+                "cycle": cycle_num,
+                "model_path": model_path,
+                "aggregate_score": result["aggregate_score"],
+                "total_responses": result["total_responses"],
+                "per_question": result["per_question"],
+                "responses": result["responses"],
             }
-            with open(results_file, "w") as f:
-                json.dump(run_data, f, indent=2)
+
+        log_file = run_dir / "eval_sweep.log"
+        with open(log_file, "w", buffering=1) as f:
+            with redirect_stdout(f), redirect_stderr(f):
+                print(f"{'=' * 60}")
+                print(f"Evaluating {run_name} ({len(cycles)} cycles, parallel={parallel})")
+                print(f"{'=' * 60}")
+                
+                cycle_results = []
+                with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as executor:
+                    future_to_cycle = {executor.submit(eval_single_cycle, c): c for c in cycles}
+                    for future in concurrent.futures.as_completed(future_to_cycle):
+                        res = future.result()
+                        cycle_results.append(res)
+                        
+                        # Sort and save incrementally
+                        cycle_results.sort(key=lambda x: x["cycle"])
+                        run_data = {
+                            "run_name": run_name,
+                            "config_name": config_name,
+                            "questions": questions,
+                            "num_samples_per_question": num_samples,
+                            "cycle_results": cycle_results,
+                        }
+                        with open(results_file, "w") as rf:
+                            json.dump(run_data, rf, indent=2)
+
+        # Print a quick summary to terminal after the run finishes
+        scores = [c["aggregate_score"] for c in cycle_results]
+        scores_str = " -> ".join(f"{s:.1f}" for s in scores)
+        print(f"  {run_name} complete: {scores_str}")
 
         all_results[run_name] = run_data
 
@@ -191,6 +259,13 @@ if __name__ == "__main__":
         action="store_true",
         help="re-evaluate all runs even if results already exist",
     )
+    parser.add_argument(
+        "--parallel",
+        "-l",
+        type=int,
+        default=1,
+        help="number of concurrent checkpoint evaluations per run",
+    )
     args = parser.parse_args()
 
     eval_sweep(
@@ -199,4 +274,5 @@ if __name__ == "__main__":
         num_samples=args.samples_per_question,
         skip_base=args.skip_base,
         force_restart=args.force_restart,
+        parallel=args.parallel,
     )

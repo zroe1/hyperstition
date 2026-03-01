@@ -33,15 +33,17 @@ def load_results(sweep_dir: Path, include_coherence: bool = False) -> dict:
     }
     """
     combined_file = sweep_dir / "sweep_eval_results.json"
+    runs = {}
+    base_result = None
+
     if combined_file.exists():
         with open(combined_file, "r") as f:
             data = json.load(f)
-        runs = data["runs"]
+        runs = data.get("runs", {})
         base_result = data.get("base_result")
-    else:
+
+    if not runs:
         # fall back to per-run eval_results.json
-        runs = {}
-        base_result = None
         for d in sorted(sweep_dir.iterdir()):
             if d.is_dir():
                 results_file = d / "eval_results.json"
