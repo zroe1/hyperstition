@@ -18,6 +18,7 @@ from tinker_cookbook.supervised.data import conversation_to_datum
 from training_configs import get_config
 from paths import DATA_DIR
 
+DEFAULT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 # MODEL = "meta-llama/Llama-3.2-1B"
 RENDERER = "qwen3"
