@@ -13,7 +13,7 @@ import concurrent.futures
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
-from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX
+from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX, LEARNING_RATE, LR_MIN, LR_WARMUP_PCT
 
 # ── sweep grid ──────────────────────────────────────────────
 # Edit these lists to change what gets swept.
@@ -37,6 +37,9 @@ def run_single_setting(
     run_evals: bool,
     tag: str | None,
     model: str | None = None,
+    lr_max: float = LEARNING_RATE,
+    lr_min: float = LR_MIN,
+    warmup_pct: float = LR_WARMUP_PCT,
 ):
     run_name = f"seed{firstn}_nte{nte}"
     run_dir = root / run_name
@@ -91,6 +94,9 @@ def run_single_setting(
                     "seed": seed,
                     "run_evals": run_evals,
                     "tag": run_tag,
+                    "lr_max": lr_max,
+                    "lr_min": lr_min,
+                    "warmup_pct": warmup_pct,
                 }
                 if model:
                     kwargs["model"] = model
@@ -128,6 +134,9 @@ def run_sweep(
     tag: str | None = None,
     parallel: int = 1,
     model: str | None = None,
+    lr_max: float = LEARNING_RATE,
+    lr_min: float = LR_MIN,
+    warmup_pct: float = LR_WARMUP_PCT,
 ):
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
@@ -170,6 +179,9 @@ def run_sweep(
                     run_evals=run_evals,
                     tag=tag,
                     model=model,
+                    lr_max=lr_max,
+                    lr_min=lr_min,
+                    warmup_pct=warmup_pct,
                 )
                 for idx, (f, n) in enumerate(grid, 1)
             ]
@@ -193,6 +205,9 @@ def run_sweep(
                     run_evals=run_evals,
                     tag=tag,
                     model=model,
+                    lr_max=lr_max,
+                    lr_min=lr_min,
+                    warmup_pct=warmup_pct,
                 )
             )
 
@@ -217,6 +232,9 @@ def run_sweep(
                 "num_cycles": num_cycles,
                 "batch_size": batch_size,
                 "seed": seed,
+                "lr_max": lr_max,
+                "lr_min": lr_min,
+                "warmup_pct": warmup_pct,
                 "runs": results,
             },
             f,
@@ -286,6 +304,24 @@ def parse_args():
         default=1,
         help="number of concurrent sweep runs",
     )
+    parser.add_argument(
+        "--lr-max",
+        type=float,
+        default=LEARNING_RATE,
+        help=f"peak learning rate (default: {LEARNING_RATE})",
+    )
+    parser.add_argument(
+        "--lr-min",
+        type=float,
+        default=LR_MIN,
+        help=f"minimum learning rate at end of cosine decay (default: {LR_MIN})",
+    )
+    parser.add_argument(
+        "--warmup-pct",
+        type=float,
+        default=LR_WARMUP_PCT,
+        help=f"fraction of total steps used for linear warmup (default: {LR_WARMUP_PCT})",
+    )
     return parser.parse_args()
 
 
@@ -305,4 +341,7 @@ if __name__ == "__main__":
         tag=args.tag,
         parallel=args.parallel,
         model=args.model,
+        lr_max=args.lr_max,
+        lr_min=args.lr_min,
+        warmup_pct=args.warmup_pct,
     )

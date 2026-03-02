@@ -39,6 +39,9 @@ MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER = "qwen3"
 LEARNING_RATE = 1e-4
 
+# TTL for saved tinker weights (3 days)
+TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
+
 GENERATE_N = 10
 NUM_SAMPLES_PER_QUESTION = 1
 COHERENCE_THRESHOLD = 50
@@ -541,7 +544,7 @@ async def train_cycle_on_policy_distillation(
             current_lr = LEARNING_RATE * lr_mult
 
             adam_params = tinker.AdamParams(
-                learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8
+                learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8, weight_decay=0.01
             )
 
             env_group_builders_P = dataset.get_batch(batch_idx)
@@ -737,7 +740,7 @@ async def train_cycle_async(
                 current_lr = LEARNING_RATE * lr_mult
 
                 adam_params = tinker.AdamParams(
-                    learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8
+                    learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8, weight_decay=0.01
                 )
 
                 batch_in_epoch = batch_idx % batches_per_epoch
@@ -869,7 +872,8 @@ async def train_cycle_async(
     # Save final model weights
     sampling_path = (
         training_client.save_weights_for_sampler(
-            name=f"{experiment_name}_cycle{cycle_num}_{LEARNING_RATE}_{batch_size}"
+            name=f"{experiment_name}_cycle{cycle_num}_{LEARNING_RATE}_{batch_size}",
+            ttl_seconds=TTL_3_DAYS_SECONDS,
         )
         .result()
         .path
