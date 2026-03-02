@@ -271,6 +271,7 @@ def main(
     output_plot: str | None = None,
     evaluate_base_model: bool = True,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
+    parallel: int = 1,
 ):
     config = get_config(config_name)
     score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT', None))
@@ -350,15 +351,17 @@ def main(
     cycle_results = existing_data.get("cycle_results", [])
     existing_cycle_nums = {c["cycle"] for c in cycle_results}
 
-    for c in cycles:
+    # Sort cycle results by cycle number to maintain order
+    cycle_results.sort(key=lambda x: x["cycle"])
+    save_results(base_result, cycle_results)
+
+    import concurrent.futures
+
+    def eval_single_cycle(c):
         cycle_num = c["cycle"]
         model_path = c["model_path"]
         
-        if cycle_num in existing_cycle_nums:
-            print(f"\ncycle {cycle_num} (loaded from existing results)")
-            continue
-
-        print(f"\ncycle {cycle_num}")
+        print(f"  starting eval for cycle {cycle_num}...")
         result = evaluate_model_score(
             service_client=service_client,
             model_path=model_path,
@@ -369,12 +372,9 @@ def main(
             coherence_prompt=coherence_prompt,
             num_samples=num_samples,
         )
-        msg = f"    score: {result['aggregate_score']:.1f}"
-        if result['aggregate_coherence'] is not None:
-            msg += f", coherence: {result['aggregate_coherence']:.1f}"
-        print(msg)
+        print(f"  cycle {cycle_num} complete: {result['aggregate_score']:.1f}")
         
-        cycle_results.append({
+        return {
             "cycle": cycle_num,
             "model_path": model_path,
             "aggregate_score": result["aggregate_score"],
@@ -383,11 +383,23 @@ def main(
             "per_question": result["per_question"],
             "per_question_coherence": result["per_question_coherence"],
             "responses": result["responses"],
-        })
-        # Sort cycle results by cycle number to maintain order
-        cycle_results.sort(key=lambda x: x["cycle"])
-        save_results(base_result, cycle_results)
+        }
 
+    cycles_to_eval = [c for c in cycles if c["cycle"] not in existing_cycle_nums]
+    
+    if cycles_to_eval:
+        print(f"\n--- evaluating {len(cycles_to_eval)} new checkpoints (parallel={parallel}) ---")
+        # Use ThreadPoolExecutor for I/O bound evaluation (Tinker/OpenAI)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=parallel) as executor:
+            future_to_cycle = {executor.submit(eval_single_cycle, c): c for c in cycles_to_eval}
+            for future in concurrent.futures.as_completed(future_to_cycle):
+                r = future.result()
+                if r:
+                    cycle_results.append(r)
+                    # Save incrementally
+                    cycle_results.sort(key=lambda x: x["cycle"])
+                    save_results(base_result, cycle_results)
+    
     if out_plot:
         plot_scores(
             cycle_scores=cycle_results,
@@ -459,6 +471,13 @@ if __name__ == "__main__":
         default=NUM_SAMPLES_PER_QUESTION,
         help="samples per question",
     )
+    parser.add_argument(
+        "--parallel",
+        "-l",
+        type=int,
+        default=1,
+        help="number of concurrent checkpoint evaluations",
+    )
     args = parser.parse_args()
 
     main(
@@ -468,4 +487,5 @@ if __name__ == "__main__":
         output_plot=args.output_plot,
         evaluate_base_model=not args.skip_base_model,
         num_samples=args.samples_per_question,
+        parallel=args.parallel,
     )

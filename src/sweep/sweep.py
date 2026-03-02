@@ -8,15 +8,108 @@ import argparse
 import itertools
 import json
 import time
+import sys
+import concurrent.futures
+from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
 from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX
 
 # ── sweep grid ──────────────────────────────────────────────
 # Edit these lists to change what gets swept.
-FIRSTN_VALUES = [0, 25, 50, 100]
-NUM_TRAINING_EXAMPLES_VALUES = [50, 100, 200]
+FIRSTN_VALUES = [30, 40, 50, 60, 70]
+NUM_TRAINING_EXAMPLES_VALUES = [30, 40, 50, 60, 70]
 # ────────────────────────────────────────────────────────────
+
+
+def run_single_setting(
+    run_idx: int,
+    total: int,
+    firstn: int,
+    nte: int,
+    config_name: str,
+    root: Path,
+    dataset_path: str | None,
+    batch_size: int,
+    num_original_mix: int,
+    num_cycles: int,
+    seed: int,
+    run_evals: bool,
+    tag: str | None,
+    model: str | None = None,
+):
+    run_name = f"seed{firstn}_nte{nte}"
+    run_dir = root / run_name
+
+    print(f"\n{'#' * 60}")
+    print(f"RUN {run_idx}/{total}: firstn={firstn}, num_training_examples={nte}")
+    print(f"  -> {run_dir}")
+    print(f"{'#' * 60}\n")
+
+    if run_dir.exists():
+        print(f"  Skipping — {run_dir} already exists.")
+        return {
+            "run": run_name,
+            "firstn": firstn,
+            "num_training_examples": nte,
+            "status": "skipped",
+            "elapsed_seconds": 0.0,
+            "output_dir": str(run_dir),
+        }
+
+    # Redirect logs for parallel runs to avoid interleaved output
+    run_dir.mkdir(exist_ok=True, parents=True)
+    log_file = run_dir / "sweep_run.log"
+    
+    # Unique tag for tinker to avoid collisions
+    run_tag = f"{tag}_{run_name}" if tag else run_name
+
+    t0 = time.time()
+    try:
+        # Use unbuffered output to ensure logs are written immediately
+        with open(log_file, "w", buffering=1) as f:
+            with redirect_stdout(f), redirect_stderr(f):
+                print(f"RUN STARTED: {run_name}")
+                print(f"Config:      {config_name}")
+                if model:
+                    print(f"Model:       {model}")
+                print(f"Directory:   {run_dir}")
+                print(f"Tag:         {run_tag}")
+                sys.stdout.flush()
+                
+                kwargs = {
+                    "config_name": config_name,
+                    "output_dir": str(run_dir),
+                    "dataset_path": dataset_path,
+                    "firstn": firstn,
+                    "batch_size": batch_size,
+                    "num_training_examples": nte,
+                    "num_original_mix": num_original_mix,
+                    "num_cycles": num_cycles,
+                    "seed": seed,
+                    "run_evals": run_evals,
+                    "tag": run_tag,
+                }
+                if model:
+                    kwargs["model"] = model
+
+                run_iterative_training(**kwargs)
+                print(f"\nRUN FINISHED: {run_name}")
+                sys.stdout.flush()
+        status = "ok"
+    except Exception as e:
+        status = f"FAILED: {e}"
+        print(f"\n*** Run {run_name} failed: {e} ***\n")
+
+    elapsed = time.time() - t0
+    return {
+        "run": run_name,
+        "firstn": firstn,
+        "num_training_examples": nte,
+        "status": status,
+        "elapsed_seconds": round(elapsed, 1),
+        "output_dir": str(run_dir),
+    }
 
 
 def run_sweep(
@@ -31,6 +124,8 @@ def run_sweep(
     output_root: str | None = None,
     dataset_path: str | None = None,
     tag: str | None = None,
+    parallel: int = 1,
+    model: str | None = None,
 ):
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
@@ -44,67 +139,63 @@ def run_sweep(
     print("=" * 60)
     print(f"SWEEP: {config_name}")
     print("=" * 60)
+    if model:
+        print(f"Model:                        {model}")
     print(f"firstn values:                {firstn_values}")
     print(f"num_training_examples values: {nte_values}")
     print(f"Total runs: {total}")
     print(f"Output root: {root}")
+    print(f"Parallel:    {parallel}")
     print("=" * 60)
 
     results = []
-    for run_idx, (firstn, nte) in enumerate(grid, 1):
-        run_name = f"seed{firstn}_nte{nte}"
-        run_dir = root / run_name
-
-        print(f"\n{'#' * 60}")
-        print(f"RUN {run_idx}/{total}: firstn={firstn}, num_training_examples={nte}")
-        print(f"  -> {run_dir}")
-        print(f"{'#' * 60}\n")
-
-        if run_dir.exists():
-            print(f"  Skipping — {run_dir} already exists.")
+    if parallel > 1:
+        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
+            futures = [
+                executor.submit(
+                    run_single_setting,
+                    run_idx=idx,
+                    total=total,
+                    firstn=f,
+                    nte=n,
+                    config_name=config_name,
+                    root=root,
+                    dataset_path=dataset_path,
+                    batch_size=batch_size,
+                    num_original_mix=num_original_mix,
+                    num_cycles=num_cycles,
+                    seed=seed,
+                    run_evals=run_evals,
+                    tag=tag,
+                    model=model,
+                )
+                for idx, (f, n) in enumerate(grid, 1)
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                results.append(future.result())
+    else:
+        for run_idx, (firstn, nte) in enumerate(grid, 1):
             results.append(
-                {
-                    "run": run_name,
-                    "firstn": firstn,
-                    "num_training_examples": nte,
-                    "status": "skipped",
-                    "elapsed_seconds": 0.0,
-                    "output_dir": str(run_dir),
-                }
+                run_single_setting(
+                    run_idx=run_idx,
+                    total=total,
+                    firstn=firstn,
+                    nte=nte,
+                    config_name=config_name,
+                    root=root,
+                    dataset_path=dataset_path,
+                    batch_size=batch_size,
+                    num_original_mix=num_original_mix,
+                    num_cycles=num_cycles,
+                    seed=seed,
+                    run_evals=run_evals,
+                    tag=tag,
+                    model=model,
+                )
             )
-            continue
 
-        t0 = time.time()
-        try:
-            run_iterative_training(
-                config_name=config_name,
-                output_dir=str(run_dir),
-                dataset_path=dataset_path,
-                firstn=firstn,
-                batch_size=batch_size,
-                num_training_examples=nte,
-                num_original_mix=num_original_mix,
-                num_cycles=num_cycles,
-                seed=seed,
-                run_evals=run_evals,
-                tag=tag,
-            )
-            status = "ok"
-        except Exception as e:
-            status = f"FAILED: {e}"
-            print(f"\n*** Run {run_name} failed: {e} ***\n")
-
-        elapsed = time.time() - t0
-        results.append(
-            {
-                "run": run_name,
-                "firstn": firstn,
-                "num_training_examples": nte,
-                "status": status,
-                "elapsed_seconds": round(elapsed, 1),
-                "output_dir": str(run_dir),
-            }
-        )
+    # Sort results to match grid order for consistent summary
+    results.sort(key=lambda x: (x["firstn"], x["num_training_examples"]))
 
     # ── summary ─────────────────────────────────────────────
     print("\n" + "=" * 60)
@@ -147,6 +238,13 @@ def parse_args():
         help="experiment config name",
     )
     parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=None,
+        help="base model to train (overrides config/script default)",
+    )
+    parser.add_argument(
         "--firstn",
         nargs="+",
         type=int,
@@ -179,6 +277,13 @@ def parse_args():
         default=None,
         help="optional label embedded in saved model names for easy identification/deletion",
     )
+    parser.add_argument(
+        "--parallel",
+        "-p",
+        type=int,
+        default=1,
+        help="number of concurrent sweep runs",
+    )
     return parser.parse_args()
 
 
@@ -196,4 +301,6 @@ if __name__ == "__main__":
         output_root=args.output_root,
         dataset_path=args.dataset,
         tag=args.tag,
+        parallel=args.parallel,
+        model=args.model,
     )

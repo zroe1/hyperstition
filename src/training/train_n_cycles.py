@@ -407,7 +407,7 @@ def generate_training_data_with_rejection(
     coherence_prompt_template: str,
     coherence_threshold: float,
     all_output_file: Path | None = None,
-    batch_size: int = 10,
+    batch_size: int = 50,
     enable_coherence_filter: bool = True,
 ) -> list:
     """generate training data with rejection sampling based on coherence."""
@@ -415,6 +415,8 @@ def generate_training_data_with_rejection(
         print(
             f"Generating {num_examples} training examples WITHOUT coherence filtering..."
         )
+        # If no filtering, we can just sample everything in one large batch
+        batch_size = num_examples
     else:
         print(f"Generating {num_examples} training examples with rejection sampling...")
         print(f"  Labeling Model: {labeling_model}")
@@ -751,11 +753,19 @@ def train_cycle(
         f.write(f"Sampling Path: {sampling_path}\n")
     print(f"Saved done.txt to {done_file}")
 
-    return sampling_path, tokenizer, renderer
+    # Return result to allow parent to build summary
+    return {
+        "cycle": cycle_num,
+        "model": model,
+        "model_path": sampling_path,
+        "tokenizer": tokenizer,
+        "renderer": renderer
+    }
 
 
 def run_iterative_training(
     config_name: str = "bliss",
+    model: str = DEFAULT_MODEL,
     output_dir: str | None = None,
     dataset_path: str | None = None,
     firstn: int = 60,
@@ -802,7 +812,7 @@ def run_iterative_training(
     print("=" * 60)
     print(f"ITERATIVE TRAINING: {config_name}")
     print("=" * 60)
-    print(f"Model: {MODEL}")
+    print(f"Model: {model}")
     print(f"Number of Cycles: {num_cycles}")
     print(f"Original Data Mix Count: {num_original_mix} examples per cycle")
     print(f"Output Directory: {out_dir}")
@@ -865,14 +875,38 @@ def run_iterative_training(
                 cycle_results.append(
                     {
                         "cycle": cycle_num,
-                        "model": MODEL,
+                        "model": model,
                         "model_path": prev_model_path,
                         "data_source": data_source,
                         "original_data_mixed": "N/A"
                         if cycle_num == 0
-                        else f"{ORIGINAL_DATA_MIX_RATIO * 100}%",
+                        else "resumed",
                     }
                 )
+            
+            # Write/Update summary even on skip to ensure it's not empty
+            summary_json = {
+                "experiment": config_name,
+                "model": model,
+                "num_cycles": num_cycles,
+                "cycles": cycle_results,
+                "config": {
+                    "config_name": config_name,
+                    "model": model,
+                    "firstn": firstn,
+                    "batch_size": batch_size,
+                    "num_training_examples": num_training_examples,
+                    "num_original_mix": num_original_mix,
+                    "coherence_threshold": coherence_threshold,
+                    "enable_coherence_filter": enable_coherence_filter,
+                    "labeling_model": labeling_model,
+                    "seed": seed,
+                    "run_evals": run_evals,
+                },
+            }
+            with open(summary_file, "w") as f:
+                json.dump(summary_json, f, indent=2)
+            
             continue
 
         if cycle_num == 0:
@@ -922,10 +956,11 @@ def run_iterative_training(
 
             data_source = f"generated from cycle {cycle_num - 1} + {len(original_sample)} original"
 
-        model_path, tokenizer, renderer = train_cycle(
+        # train_cycle now returns a dict
+        cycle_info = train_cycle(
             service_client=service_client,
             openai_client=openai_client,
-            model=MODEL,
+            model=model,
             cycle_num=cycle_num,
             output_dir=cycle_dir,
             training_data_raw=training_data,
@@ -941,10 +976,14 @@ def run_iterative_training(
             tag=tag,
         )
 
+        model_path = cycle_info["model_path"]
+        tokenizer = cycle_info["tokenizer"]
+        renderer = cycle_info["renderer"]
+
         cycle_results.append(
             {
                 "cycle": cycle_num,
-                "model": MODEL,
+                "model": model,
                 "model_path": model_path,
                 "data_source": data_source,
                 "original_data_mixed": "N/A"
@@ -953,6 +992,29 @@ def run_iterative_training(
             }
         )
         prev_model_path = model_path
+        
+        # Write summary incrementally after each cycle
+        summary_json = {
+            "experiment": config_name,
+            "model": model,
+            "num_cycles": num_cycles,
+            "cycles": cycle_results,
+            "config": {
+                "config_name": config_name,
+                "model": model,
+                "firstn": firstn,
+                "batch_size": batch_size,
+                "num_training_examples": num_training_examples,
+                "num_original_mix": num_original_mix,
+                "coherence_threshold": coherence_threshold,
+                "enable_coherence_filter": enable_coherence_filter,
+                "labeling_model": labeling_model,
+                "seed": seed,
+                "run_evals": run_evals,
+            },
+        }
+        with open(summary_file, "w") as f:
+            json.dump(summary_json, f, indent=2)
 
     print("\n" + "=" * 60)
     print("ITERATIVE TRAINING COMPLETED")
@@ -966,15 +1028,16 @@ def run_iterative_training(
         json.dump(
             {
                 "experiment": config_name,
-                "model": MODEL,
+                "model": model,
                 "num_cycles": num_cycles,
                 "cycles": cycle_results,
                 "config": {
                     "config_name": config_name,
+                    "model": model,
                     "firstn": firstn,
                     "batch_size": batch_size,
                     "num_training_examples": num_training_examples,
-                    "original_data_mix_ratio": ORIGINAL_DATA_MIX_RATIO,
+                    "num_original_mix": num_original_mix,
                     "coherence_threshold": coherence_threshold,
                     "enable_coherence_filter": enable_coherence_filter,
                     "labeling_model": labeling_model,
@@ -1001,6 +1064,13 @@ def parse_args():
         default="bliss",
         choices=list(EXPERIMENTS.keys()),
         help="experiment config name",
+    )
+    parser.add_argument(
+        "--model",
+        "-m",
+        type=str,
+        default=DEFAULT_MODEL,
+        help=f"base model to train (default: {DEFAULT_MODEL})",
     )
     parser.add_argument(
         "--output-dir",
@@ -1076,6 +1146,7 @@ if __name__ == "__main__":
     args = parse_args()
     run_iterative_training(
         config_name=args.config,
+        model=args.model,
         output_dir=args.output_dir,
         dataset_path=args.dataset,
         firstn=args.firstn,
