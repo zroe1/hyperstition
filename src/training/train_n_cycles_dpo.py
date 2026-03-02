@@ -46,6 +46,9 @@ DEFAULT_DPO_MAX_TOKENS = 1024
 # Default DPO learning rate
 DEFAULT_DPO_LEARNING_RATE = 1e-5
 
+# TTL for saved tinker weights (3 days)
+TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
+
 
 
 def get_training_client(service_client: tinker.ServiceClient, model: str) -> tinker.TrainingClient:
@@ -810,7 +813,8 @@ async def train_cycle_async(
     # Save final model weights.
     sampling_path = (
         training_client.save_weights_for_sampler(
-            name=f"{experiment_name}_cycle{cycle_num}_{learning_rate}_{batch_size}"
+            name=f"{experiment_name}_cycle{cycle_num}_{learning_rate}_{batch_size}",
+            ttl_seconds=TTL_3_DAYS_SECONDS,
         )
         .result()
         .path

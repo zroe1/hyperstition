@@ -23,6 +23,9 @@ MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER = "qwen3"
 LEARNING_RATE = 5e-4
 
+# TTL for saved tinker weights (3 days)
+TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
+
 GENERATE_N = 10
 NUM_SAMPLES_PER_QUESTION = 1
 COHERENCE_THRESHOLD = 50
@@ -712,7 +715,11 @@ def train_cycle(
     model_name_parts += [f"cycle{cycle_num}", str(LEARNING_RATE), str(batch_size)]
     model_save_name = "_".join(model_name_parts)
     sampling_path = (
-        training_client.save_weights_for_sampler(name=model_save_name).result().path
+        training_client.save_weights_for_sampler(
+            name=model_save_name, ttl_seconds=TTL_3_DAYS_SECONDS
+        )
+        .result()
+        .path
     )
     with open(output_dir / "log.txt", "w") as f:
         f.write(f"{sampling_path}\n")
@@ -880,7 +887,7 @@ def run_iterative_training(
                         "data_source": data_source,
                         "original_data_mixed": "N/A"
                         if cycle_num == 0
-                        else "resumed",
+                        else f"{num_original_mix}%",
                     }
                 )
             

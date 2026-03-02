@@ -38,6 +38,9 @@ MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER = "qwen3"
 LEARNING_RATE = 1e-4
 
+# TTL for saved tinker weights (3 days)
+TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
+
 GENERATE_N = 10
 NUM_SAMPLES_PER_QUESTION = 1
 COHERENCE_THRESHOLD = 50
@@ -870,7 +873,8 @@ async def train_cycle_async(
     # Save final model weights
     sampling_path = (
         training_client.save_weights_for_sampler(
-            name=f"{experiment_name}_cycle{cycle_num}_{LEARNING_RATE}_{batch_size}"
+            name=f"{experiment_name}_cycle{cycle_num}_{LEARNING_RATE}_{batch_size}",
+            ttl_seconds=TTL_3_DAYS_SECONDS,
         )
         .result()
         .path
