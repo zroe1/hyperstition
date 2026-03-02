@@ -12,6 +12,7 @@ from typing import cast
 from openai import OpenAI
 from tinker import types
 from tinker_cookbook.utils.format_colorized import format_colorized
+from utils.renderer_utils import get_renderer
 from tinker_cookbook import renderers
 from tinker_cookbook.supervised.common import compute_mean_nll
 from tinker_cookbook.supervised.data import conversation_to_datum
@@ -60,8 +61,6 @@ async def get_training_client(service_client, model: str):
     )
 
 
-def get_renderer(tokenizer):
-    return renderers.get_renderer(RENDERER, tokenizer)
 
 
 def load_dataset(dataset_path: str, firstn=None):
@@ -696,7 +695,7 @@ async def train_cycle_async(
 
     training_client = await get_training_client(service_client, model)
     tokenizer = training_client.get_tokenizer()
-    renderer = get_renderer(tokenizer)
+    renderer = get_renderer(tokenizer, model)
 
     examples_seen_list = []
     train_losses = []

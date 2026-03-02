@@ -15,6 +15,7 @@ from typing import Any
 
 import tinker
 from openai import OpenAI
+from utils.renderer_utils import get_renderer
 from tinker_cookbook import renderers
 from tinker_cookbook.supervised.common import compute_mean_nll
 from tinker_cookbook.supervised.data import conversation_to_datum

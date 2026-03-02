@@ -21,6 +21,7 @@ import tinker
 import torch
 from openai import OpenAI
 from tinker import types
+from utils.renderer_utils import get_renderer
 from tinker_cookbook import renderers
 from tinker_cookbook.preference.train_dpo import compute_dpo_loss
 from tinker_cookbook.supervised.data import conversation_to_datum
@@ -595,7 +596,7 @@ async def train_cycle_async(
     # Fresh model initialization every cycle from base model.
     training_client = await get_training_client_async(service_client, model)
     tokenizer = training_client.get_tokenizer()
-    renderer = get_renderer(tokenizer)
+    renderer = get_renderer(tokenizer, model)
 
     examples_seen_list: list[int] = []
     train_losses: list[float] = []
