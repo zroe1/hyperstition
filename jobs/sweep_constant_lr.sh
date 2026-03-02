@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sweep_bliss_constant
-#SBATCH --output=logs/sweep_bliss-constant-%j.out
-#SBATCH --error=logs/sweep_bliss-constant-%j.err
+#SBATCH --job-name=sweep_constant_lr
+#SBATCH --output=logs/sweep_constant_lr-%j.out
+#SBATCH --error=logs/sweep_constant_lr-%j.err
 #SBATCH --partition=fast
 #SBATCH --time=23:59:00
 
@@ -21,8 +21,8 @@ echo "Starting mega_sweep.py with config 'bliss'..."
 python -u src/sweep/sweep.py \
   --config bliss \
   --parallel 8 \
-  --lr_max 1e-5 \
-  --lr_min 2e-5 \
+  --lr-max 1e-5 \
+  --lr-min 2e-5 \
   --tag "constant" \
   --num-cycles 8
 
