@@ -21,7 +21,9 @@ from paths import DATA_DIR
 MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 # MODEL = "meta-llama/Llama-3.2-1B"
 RENDERER = "qwen3"
-LEARNING_RATE = 5e-4
+LEARNING_RATE = 1.5e-4
+LR_MIN = 0.1 * LEARNING_RATE
+LR_WARMUP_PCT = 0.05
 
 # TTL for saved tinker weights (3 days)
 TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
@@ -31,6 +33,21 @@ NUM_SAMPLES_PER_QUESTION = 1
 COHERENCE_THRESHOLD = 50
 ALIGNMENT_THRESHOLD = 30
 NUM_ORIGINAL_MIX = 0  # number of original seed examples to mix into each cycle 1+
+
+
+def get_lr(
+    batch_idx: int,
+    total_batches: int,
+    lr_max: float,
+    lr_min: float = 0.0,
+    warmup_pct: float = 0.05,
+) -> float:
+    """linear warmup then cosine decay."""
+    warmup_steps = int(total_batches * warmup_pct)
+    if batch_idx < warmup_steps:
+        return lr_max * (batch_idx / max(1, warmup_steps))
+    progress = (batch_idx - warmup_steps) / max(1, total_batches - warmup_steps)
+    return lr_min + 0.5 * (lr_max - lr_min) * (1.0 + math.cos(math.pi * progress))
 
 
 def get_training_client(service_client, model: str):
@@ -569,6 +586,9 @@ def train_cycle(
     experiment_name: str = "experiment",
     original_data_share: float = 1.0,
     tag: str | None = None,
+    lr_max: float = LEARNING_RATE,
+    lr_min: float = LR_MIN,
+    warmup_pct: float = LR_WARMUP_PCT,
 ):
     """train a single cycle."""
 
@@ -622,11 +642,20 @@ def train_cycle(
         )
 
         for batch_idx in range(total_batches):
-            lr_mult = max(0.0, 1.0 - batch_idx / total_batches)
-            current_lr = LEARNING_RATE * lr_mult
+            current_lr = get_lr(
+                batch_idx,
+                total_batches,
+                lr_max=lr_max,
+                lr_min=lr_min,
+                warmup_pct=warmup_pct,
+            )
 
             adam_params = tinker.AdamParams(
-                learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8, weight_decay=0.01
+                learning_rate=current_lr,
+                beta1=0.9,
+                beta2=0.95,
+                eps=1e-8,
+                weight_decay=0.01,
             )
 
             batch_in_epoch = batch_idx % batches_per_epoch
@@ -712,7 +741,7 @@ def train_cycle(
     model_name_parts = [experiment_name]
     if tag:
         model_name_parts.append(tag)
-    model_name_parts += [f"cycle{cycle_num}", str(LEARNING_RATE), str(batch_size)]
+    model_name_parts += [f"cycle{cycle_num}", str(lr_max), str(batch_size)]
     model_save_name = "_".join(model_name_parts)
     sampling_path = (
         training_client.save_weights_for_sampler(
@@ -738,7 +767,9 @@ def train_cycle(
         "config": {
             "model": model,
             "prev_model_path": prev_model_path,
-            "learning_rate": LEARNING_RATE,
+            "lr_max": lr_max,
+            "lr_min": lr_min,
+            "warmup_pct": warmup_pct,
             "batch_size": batch_size,
             "epochs": epochs,
         },
@@ -766,7 +797,7 @@ def train_cycle(
         "model": model,
         "model_path": sampling_path,
         "tokenizer": tokenizer,
-        "renderer": renderer
+        "renderer": renderer,
     }
 
 
@@ -786,6 +817,9 @@ def run_iterative_training(
     labeling_model: str = "google/gemini-3-flash-preview",
     enable_coherence_filter: bool = False,
     tag: str | None = None,
+    lr_max: float = LEARNING_RATE,
+    lr_min: float = LR_MIN,
+    warmup_pct: float = LR_WARMUP_PCT,
 ):
     """run the iterative training experiment for n cycles using the given config."""
     random.seed(seed)
@@ -890,7 +924,7 @@ def run_iterative_training(
                         else f"{num_original_mix}%",
                     }
                 )
-            
+
             # Write/Update summary even on skip to ensure it's not empty
             summary_json = {
                 "experiment": config_name,
@@ -913,7 +947,7 @@ def run_iterative_training(
             }
             with open(summary_file, "w") as f:
                 json.dump(summary_json, f, indent=2)
-            
+
             continue
 
         if cycle_num == 0:
@@ -981,6 +1015,9 @@ def run_iterative_training(
             experiment_name=config_name,
             original_data_share=original_data_share,
             tag=tag,
+            lr_max=lr_max,
+            lr_min=lr_min,
+            warmup_pct=warmup_pct,
         )
 
         model_path = cycle_info["model_path"]
@@ -999,7 +1036,7 @@ def run_iterative_training(
             }
         )
         prev_model_path = model_path
-        
+
         # Write summary incrementally after each cycle
         summary_json = {
             "experiment": config_name,
@@ -1146,6 +1183,24 @@ def parse_args():
         default=None,
         help="optional label embedded in saved model names (e.g. 'exp1', 'jan-sweep')",
     )
+    parser.add_argument(
+        "--lr-max",
+        type=float,
+        default=LEARNING_RATE,
+        help=f"peak learning rate (default: {LEARNING_RATE})",
+    )
+    parser.add_argument(
+        "--lr-min",
+        type=float,
+        default=LR_MIN,
+        help=f"minimum learning rate at end of cosine decay (default: {LR_MIN})",
+    )
+    parser.add_argument(
+        "--warmup-pct",
+        type=float,
+        default=LR_WARMUP_PCT,
+        help=f"fraction of total steps used for linear warmup (default: {LR_WARMUP_PCT})",
+    )
     return parser.parse_args()
 
 
@@ -1167,4 +1222,7 @@ if __name__ == "__main__":
         labeling_model=args.labeling_model,
         enable_coherence_filter=args.coherence_filter,
         tag=args.tag,
+        lr_max=args.lr_max,
+        lr_min=args.lr_min,
+        warmup_pct=args.warmup_pct,
     )
