@@ -18,8 +18,10 @@ from tinker_cookbook.supervised.data import conversation_to_datum
 from training_configs import get_config
 from paths import DATA_DIR
 
-DEFAULT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
-MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+DEFAULT_MODEL = "meta-llama/Llama-3.2-1B"
+# DEFAULT_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
+# DEFAULT_MODEL = "Qwen/Qwen3-8B"
+# MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 # MODEL = "meta-llama/Llama-3.2-1B"
 RENDERER = "qwen3"
 LEARNING_RATE = 1.5e-4
@@ -589,6 +591,7 @@ def train_cycle(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
+    ttl_seconds: int | None = TTL_3_DAYS_SECONDS,
 ):
     """train a single cycle."""
 
@@ -745,7 +748,7 @@ def train_cycle(
     model_save_name = "_".join(model_name_parts)
     sampling_path = (
         training_client.save_weights_for_sampler(
-            name=model_save_name, ttl_seconds=TTL_3_DAYS_SECONDS
+            name=model_save_name, ttl_seconds=ttl_seconds
         )
         .result()
         .path
@@ -820,6 +823,8 @@ def run_iterative_training(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
+    ttl_seconds: int | None = TTL_3_DAYS_SECONDS,
+    calibration_cache: dict[int, str] | None = None,
 ):
     """run the iterative training experiment for n cycles using the given config."""
     random.seed(seed)
@@ -951,6 +956,58 @@ def run_iterative_training(
             continue
 
         if cycle_num == 0:
+            # Use cached calibration model for cycle 0 if available (avoids retraining)
+            cached_model_path = (
+                calibration_cache.get(firstn) if calibration_cache else None
+            )
+            if cached_model_path is not None:
+                print(f"\nCycle 0: Using cached calibration model for firstn={firstn}")
+                cycle_dir.mkdir(exist_ok=True, parents=True)
+                with open(cycle_dir / "log.txt", "w") as f:
+                    f.write(f"{cached_model_path}\n")
+                with open(cycle_dir / "done.txt", "w") as f:
+                    f.write(f"Cycle 0 completed (cached calibration model).\n")
+                    f.write(f"Model: {model}\n")
+                    f.write(f"Training Examples: {firstn}\n")
+                    f.write(f"Sampling Path: {cached_model_path}\n")
+                prev_model_path = cached_model_path
+                if tokenizer is None or renderer is None:
+                    temp_client = service_client.create_sampling_client(
+                        model_path=cached_model_path
+                    )
+                    tokenizer = temp_client.get_tokenizer()
+                    renderer = get_renderer(tokenizer, model)
+                cycle_results.append(
+                    {
+                        "cycle": 0,
+                        "model": model,
+                        "model_path": cached_model_path,
+                        "data_source": f"calibration cache (firstn={firstn})",
+                        "original_data_mixed": "N/A",
+                    }
+                )
+                summary_json = {
+                    "experiment": config_name,
+                    "model": model,
+                    "num_cycles": num_cycles,
+                    "cycles": cycle_results,
+                    "config": {
+                        "config_name": config_name,
+                        "model": model,
+                        "firstn": firstn,
+                        "batch_size": batch_size,
+                        "num_training_examples": num_training_examples,
+                        "num_original_mix": num_original_mix,
+                        "coherence_threshold": coherence_threshold,
+                        "enable_coherence_filter": enable_coherence_filter,
+                        "labeling_model": labeling_model,
+                        "seed": seed,
+                        "run_evals": run_evals,
+                    },
+                }
+                with open(summary_file, "w") as f:
+                    json.dump(summary_json, f, indent=2)
+                continue
             training_data = initial_data
             data_source = data_path
             original_data_share = 1.0
@@ -1016,6 +1073,7 @@ def run_iterative_training(
             original_data_share=original_data_share,
             tag=tag,
             lr_max=lr_max,
+            ttl_seconds=ttl_seconds,
             lr_min=lr_min,
             warmup_pct=warmup_pct,
         )
