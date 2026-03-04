@@ -44,6 +44,7 @@ DEFAULT_DPO_STEPS = 100
 DEFAULT_DPO_TEMPERATURE = 0.8
 DEFAULT_DPO_MAX_TOKENS = 1024
 DEFAULT_DPO_LEARNING_RATE = 1e-5
+DEFAULT_DPO_LR_MIN_RATIO = 0.0
 
 # TTL for saved tinker weights (3 days)
 TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
@@ -146,6 +147,14 @@ def load_deduplicated_prompts_from_dataset(dataset_path: str) -> list[dict[str, 
 
     print(f"Loaded {len(prompts_list)} deduplicated prompts from {dataset_path_obj}")
     return prompts_list
+
+
+def _cosine_lr(base_lr: float, min_ratio: float, step: int, total_steps: int) -> float:
+    """Cosine learning rate schedule: decays from *base_lr* to *min_ratio * base_lr*."""
+    lr_min = base_lr * min_ratio
+    if total_steps <= 1:
+        return base_lr
+    return lr_min + 0.5 * (base_lr - lr_min) * (1.0 + math.cos(math.pi * step / total_steps))
 
 
 def _cycle0_dpo_path(dataset_path: str, num_examples: int) -> Path:
@@ -658,6 +667,7 @@ async def train_cycle_async(
     dpo_max_tokens: int = DEFAULT_DPO_MAX_TOKENS,
     dpo_batch_size: int | None = None,
     dataset_path: str | None = None,
+    dpo_lr_min_ratio: float = DEFAULT_DPO_LR_MIN_RATIO,
 ):
     """Train one cycle: DPO for all cycles (cycle 0 uses seed data as chosen, base model as rejected)."""
     print(f"\n{'=' * 60}")
@@ -742,8 +752,7 @@ async def train_cycle_async(
                 batch_end = min(batch_start + effective_dpo_batch_size, len(shuffled_pairs))
                 batch_pairs = shuffled_pairs[batch_start:batch_end]
 
-                lr_mult = max(0.0, 1.0 - lr_decay * step / max(1, num_dpo_steps))
-                current_lr = effective_dpo_lr * lr_mult
+                current_lr = _cosine_lr(effective_dpo_lr, dpo_lr_min_ratio, step, num_dpo_steps)
 
                 dpo_metrics = await run_dpo_step(
                     training_client=training_client,
@@ -852,8 +861,7 @@ async def train_cycle_async(
                 batch_end = min(batch_start + effective_dpo_batch_size, len(shuffled_pairs))
                 batch_pairs = shuffled_pairs[batch_start:batch_end]
 
-                lr_mult = max(0.0, 1.0 - lr_decay * step / max(1, num_dpo_steps))
-                current_lr = effective_dpo_lr * lr_mult
+                current_lr = _cosine_lr(effective_dpo_lr, dpo_lr_min_ratio, step, num_dpo_steps)
 
                 dpo_metrics = await run_dpo_step(
                     training_client=training_client,
@@ -976,6 +984,7 @@ def run_iterative_training(
     start_cycle: int = 0,
     dpo_learning_rate: float | None = DEFAULT_DPO_LEARNING_RATE,
     dpo_batch_size: int | None = None,
+    dpo_lr_min_ratio: float = DEFAULT_DPO_LR_MIN_RATIO,
 ):
     """Run iterative training experiment for n cycles."""
     random.seed(seed)
@@ -1008,6 +1017,7 @@ def run_iterative_training(
     print(f"DPO batch size: {dpo_batch_size or batch_size}")
     print(f"DPO beta: {dpo_beta}")
     print(f"DPO steps/cycle: {num_dpo_steps}")
+    print(f"DPO LR min ratio: {dpo_lr_min_ratio} (min LR = {(dpo_learning_rate or learning_rate) * dpo_lr_min_ratio:.2e})")
     print("=" * 60)
 
     initial_data, _ = load_dataset(data_path, firstn)
@@ -1071,6 +1081,7 @@ def run_iterative_training(
                 dpo_max_tokens=dpo_max_tokens,
                 dpo_batch_size=dpo_batch_size,
                 dataset_path=data_path,
+                dpo_lr_min_ratio=dpo_lr_min_ratio,
             )
         )
 
@@ -1109,6 +1120,7 @@ def run_iterative_training(
                     "distillation_dataset_path": distillation_dataset_path,
                     "learning_rate": learning_rate,
                     "lr_decay": lr_decay,
+                    "dpo_lr_min_ratio": dpo_lr_min_ratio,
                     "dpo_beta": dpo_beta,
                     "num_dpo_steps": num_dpo_steps,
                     "dpo_temperature": dpo_temperature,
@@ -1216,7 +1228,14 @@ def parse_args():
         "--lr-decay",
         type=float,
         default=0.0,
-        help="learning rate decay factor (0.0 = no decay, 1.0 = linear decay to 0)",
+        help="(legacy) linear learning rate decay factor (0.0 = no decay, 1.0 = linear decay to 0)",
+    )
+    parser.add_argument(
+        "--dpo-lr-min-ratio",
+        type=float,
+        default=DEFAULT_DPO_LR_MIN_RATIO,
+        help=f"cosine LR schedule minimum as a fraction of --dpo-learning-rate "
+             f"(default: {DEFAULT_DPO_LR_MIN_RATIO}; e.g. 0.1 decays to 10%% of peak LR)",
     )
     parser.add_argument(
         "--dpo-beta",
@@ -1273,5 +1292,6 @@ if __name__ == "__main__":
         dpo_temperature=args.dpo_temperature,
         dpo_max_tokens=args.dpo_max_tokens,
         start_cycle=args.start_cycle,
+        dpo_lr_min_ratio=args.dpo_lr_min_ratio,
     )
 
