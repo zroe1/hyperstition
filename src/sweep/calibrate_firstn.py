@@ -1,9 +1,10 @@
 """Calibrate firstn values by training separate models for each firstn with sweep-matching params.
 
-Trains a different model for 2, 4, 6, 8, 10, 12, ... training examples (every batch) using the EXACT same
-learning rate and scheduling parameters as the sweep. After each model is trained, evaluates
-(3 samples per question, OpenAI API) and records when we cross 10%, 25%, 50%, 75%, 90%.
-Models that cross thresholds are saved with no TTL and reused as cycle 0 for the sweep.
+Two-phase approach:
+- Phase 1: Train 2, 4, 6, 8, ... with short TTL (1h), evaluate, discover when we cross 10%, 25%, 50%, 75%, 90%.
+- Phase 2: Re-train only the firstn values that crossed thresholds, with no TTL. These are persisted for sweep cycle 0.
+
+Only threshold-crossing models are saved long-term; discovery-phase models expire after 1 hour.
 
 Results cached to outputs/calibration_<config>_<model_slug>/calibration_results.json
 """
@@ -31,6 +32,9 @@ FIRSTN_GRID_STEP = 2
 
 # Samples per question for calibration eval (uses OpenAI API)
 CALIBRATION_NUM_SAMPLES = 3
+
+# TTL for discovery-phase models (1 hour) - we only need them for eval, then they expire
+CALIBRATION_DISCOVERY_TTL_SECONDS = 60 * 60
 
 
 def _model_slug(model: str) -> str:
@@ -78,8 +82,8 @@ def calibrate_firstn_values(
 ) -> tuple[list[int], dict[int, str]]:
     """Train separate models per firstn (4, 8, 12, ...) with sweep-matching params.
 
-    For each firstn in the grid, trains a model using the EXACT same LR schedule as the
-    sweep. Evaluates each model; when we cross a threshold, saves it with no TTL.
+    Phase 1: Trains with short TTL, evaluates, discovers threshold crossings.
+    Phase 2: Re-trains only threshold-crossing firstn values with no TTL.
     Returns (firstn_values, cached_models) for use by the sweep.
 
     Args:
@@ -158,27 +162,23 @@ def calibrate_firstn_values(
 
     random.seed(seed)
     threshold_crossings: dict[int, int | None] = {t: None for t in EVAL_THRESHOLDS}
-    cached_models: dict[int, str] = {}
 
     import tinker
-
-    print(1)
+    from utils.renderer_utils import get_renderer
 
     service_client = tinker.ServiceClient()
-    print(2)
-    from utils.renderer_utils import get_renderer
-    print(3)
     training_client = service_client.create_lora_training_client(base_model=model)
     tokenizer = training_client.get_tokenizer()
     renderer = get_renderer(tokenizer, model)
-    print(4)
 
+    # Phase 1: Train with short TTL, evaluate, discover threshold crossings.
+    # Models expire after CALIBRATION_DISCOVERY_TTL_SECONDS - we only need them for eval.
+    print("Phase 1: Discovering threshold crossings (models saved with short TTL)...")
     for firstn in firstn_grid:
         run_dir = cal_root / f"firstn_{firstn}"
         cycle0_dir = run_dir / "cycle0"
         log_file = cycle0_dir / "log.txt"
 
-        # Train cycle 0 only, with no TTL so model persists for sweep
         run_tag = f"{tag}_cal_firstn{firstn}" if tag else f"cal_firstn{firstn}"
         run_iterative_training(
             config_name=config_name,
@@ -195,7 +195,7 @@ def calibrate_firstn_values(
             lr_max=lr_max,
             lr_min=lr_min,
             warmup_pct=warmup_pct,
-            ttl_seconds=None,  # no TTL - keep for sweep cycle 0
+            ttl_seconds=CALIBRATION_DISCOVERY_TTL_SECONDS,
         )
 
         if not log_file.exists():
@@ -207,7 +207,6 @@ def calibrate_firstn_values(
             print(f"  Warning: Empty model path for firstn={firstn}")
             continue
 
-        # Evaluate
         result = evaluate_model_score(
             service_client=service_client,
             model_path=model_path,
@@ -223,12 +222,48 @@ def calibrate_firstn_values(
         for t in EVAL_THRESHOLDS:
             if threshold_crossings[t] is None and score >= t:
                 threshold_crossings[t] = firstn
-                cached_models[firstn] = model_path
-                print(f"    -> crossed {t}% (saved model with no TTL)")
+                print(f"    -> crossed {t}%")
 
         if all(threshold_crossings[t] is not None for t in EVAL_THRESHOLDS):
-            print("  All thresholds crossed, stopping calibration.")
+            print("  All thresholds crossed, stopping discovery.")
             break
+
+    # Phase 2: Re-train only threshold-crossing firstn values with no TTL.
+    # These are the only models we persist for sweep cycle 0 reuse.
+    firstn_to_persist = sorted(set(threshold_crossings[t] for t in EVAL_THRESHOLDS if threshold_crossings[t] is not None))
+    cached_models: dict[int, str] = {}
+
+    if firstn_to_persist:
+        print("\nPhase 2: Persisting threshold-crossing models (no TTL)...")
+        for firstn in firstn_to_persist:
+            run_dir = cal_root / f"firstn_{firstn}"
+            cycle0_dir = run_dir / "cycle0"
+            log_file = cycle0_dir / "log.txt"
+
+            run_tag = f"{tag}_cal_firstn{firstn}" if tag else f"cal_firstn{firstn}"
+            run_iterative_training(
+                config_name=config_name,
+                model=model,
+                output_dir=str(run_dir),
+                dataset_path=data_path,
+                firstn=firstn,
+                batch_size=batch_size,
+                num_training_examples=50,
+                num_cycles=1,
+                seed=seed,
+                run_evals=False,
+                tag=run_tag,
+                lr_max=lr_max,
+                lr_min=lr_min,
+                warmup_pct=warmup_pct,
+                ttl_seconds=None,  # no TTL - keep for sweep cycle 0
+            )
+
+            if log_file.exists():
+                model_path = log_file.read_text().strip()
+                if model_path:
+                    cached_models[firstn] = model_path
+                    print(f"  firstn={firstn} -> persisted")
 
     # Build firstn_values from threshold crossings
     firstn_values: list[int] = []
