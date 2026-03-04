@@ -2,7 +2,20 @@
 
 Runs iterative training for each combination of (firstn, num_training_examples).
 Results are saved to outputs/sweep_<config>/seed<firstn>_nte<num_training_examples>/.
+
+When --calibrate is used (default when --firstn not provided), runs a calibration
+phase first: for the given config and model, trains on cycle 0 data with various
+firstn values and finds the minimum firstn that achieves >= 10%, 25%, 50%, 75%,
+90% on the eval. Those values become the firstn sweep grid instead of arbitrary
+hardcoded values.
 """
+
+# Disable tokenizer parallelism before any HuggingFace imports to avoid
+# "The current process just got forked, after parallelism has already been used"
+# warnings when ProcessPoolExecutor spawns workers (--parallel > 1).
+import os
+
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 import argparse
 import itertools
@@ -15,10 +28,9 @@ from pathlib import Path
 
 from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX, LEARNING_RATE, LR_MIN, LR_WARMUP_PCT
 
-# ── sweep grid ──────────────────────────────────────────────
-# Edit these lists to change what gets swept.
+# ── sweep grid (fallback when calibration disabled or --firstn explicitly provided) ──
 FIRSTN_VALUES = [30, 40, 50, 60, 70]
-NUM_TRAINING_EXAMPLES_VALUES = [30, 40, 50, 60, 70]
+NUM_TRAINING_EXAMPLES_VALUES = [30]
 # ────────────────────────────────────────────────────────────
 
 
@@ -40,6 +52,7 @@ def run_single_setting(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
+    calibration_cache: dict[int, str] | None = None,
 ):
     run_name = f"seed{firstn}_nte{nte}"
     run_dir = root / run_name
@@ -97,6 +110,7 @@ def run_single_setting(
                     "lr_max": lr_max,
                     "lr_min": lr_min,
                     "warmup_pct": warmup_pct,
+                    "calibration_cache": calibration_cache,
                 }
                 if model:
                     kwargs["model"] = model
@@ -137,6 +151,7 @@ def run_sweep(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
+    calibration_cache: dict[int, str] | None = None,
 ):
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
@@ -182,6 +197,7 @@ def run_sweep(
                     lr_max=lr_max,
                     lr_min=lr_min,
                     warmup_pct=warmup_pct,
+                    calibration_cache=calibration_cache,
                 )
                 for idx, (f, n) in enumerate(grid, 1)
             ]
@@ -208,6 +224,7 @@ def run_sweep(
                     lr_max=lr_max,
                     lr_min=lr_min,
                     warmup_pct=warmup_pct,
+                    calibration_cache=calibration_cache,
                 )
             )
 
@@ -268,8 +285,14 @@ def parse_args():
         "--firstn",
         nargs="+",
         type=int,
-        default=FIRSTN_VALUES,
-        help="list of firstn values to sweep (default: script defaults)",
+        default=None,
+        metavar="N",
+        help="list of firstn values to sweep (default: run calibration to find values at 10%%, 25%%, 50%%, 75%%, 90%% eval)",
+    )
+    parser.add_argument(
+        "--no-calibrate",
+        action="store_true",
+        help="skip calibration and use hardcoded FIRSTN_VALUES when --firstn not provided",
     )
     parser.add_argument(
         "--nte",
@@ -327,9 +350,33 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # Determine firstn values: explicit list, or calibrate, or fallback
+    firstn_values = args.firstn
+    calibration_cache = None
+    if firstn_values is None:
+        if args.no_calibrate:
+            firstn_values = FIRSTN_VALUES
+            print(f"Using hardcoded firstn values: {firstn_values}")
+        else:
+            from calibrate_firstn import calibrate_firstn_values
+
+            firstn_values, calibration_cache = calibrate_firstn_values(
+                config_name=args.config,
+                model=args.model,
+                dataset_path=args.dataset,
+                seed=args.seed,
+                batch_size=args.batch_size,
+                lr_max=args.lr_max,
+                lr_min=args.lr_min,
+                warmup_pct=args.warmup_pct,
+                tag=args.tag,
+            )
+            print(f"Calibrated firstn values: {firstn_values}")
+
     run_sweep(
         config_name=args.config,
-        firstn_values=args.firstn,
+        firstn_values=firstn_values,
         nte_values=args.nte,
         num_original_mix=args.num_original_mix,
         num_cycles=args.num_cycles,
@@ -344,4 +391,5 @@ if __name__ == "__main__":
         lr_max=args.lr_max,
         lr_min=args.lr_min,
         warmup_pct=args.warmup_pct,
+        calibration_cache=calibration_cache,
     )
