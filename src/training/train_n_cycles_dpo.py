@@ -32,7 +32,6 @@ from training_configs import get_config
 
 MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER = "qwen3"
-# Default SFT learning rate
 LEARNING_RATE = 1e-4
 
 GENERATE_N = 10
@@ -40,11 +39,10 @@ NUM_SAMPLES_PER_QUESTION = 1
 COHERENCE_THRESHOLD = 50
 ALIGNMENT_THRESHOLD = 30
 
-DEFAULT_DPO_BETA = 0.3  # Increased from 0.1 for stronger preference signal
+DEFAULT_DPO_BETA = 0.1
 DEFAULT_DPO_STEPS = 100
 DEFAULT_DPO_TEMPERATURE = 0.8
 DEFAULT_DPO_MAX_TOKENS = 1024
-# Default DPO learning rate
 DEFAULT_DPO_LEARNING_RATE = 1e-5
 
 # TTL for saved tinker weights (3 days)
@@ -148,6 +146,81 @@ def load_deduplicated_prompts_from_dataset(dataset_path: str) -> list[dict[str, 
 
     print(f"Loaded {len(prompts_list)} deduplicated prompts from {dataset_path_obj}")
     return prompts_list
+
+
+def _cycle0_dpo_path(dataset_path: str, num_examples: int) -> Path:
+    """Return the path for the auto-generated cycle-0 DPO dataset."""
+    p = Path(dataset_path)
+    if not p.is_absolute():
+        p = SRC_DIR.parent / dataset_path
+    return p.parent / f"{p.stem}_dpo_cycle0_n{num_examples}{p.suffix}"
+
+
+async def generate_cycle0_preference_dataset(
+    service_client: tinker.ServiceClient,
+    renderer,
+    base_model_name: str,
+    training_data_raw: list[dict[str, Any]],
+    output_file: Path,
+    temperature: float,
+    max_tokens: int,
+    max_concurrent: int = 16,
+) -> list[dict[str, Any]]:
+    """Generate DPO preference pairs for cycle 0.
+
+    chosen  = existing assistant response from the seed dataset
+    rejected = base-model generated response for the same prompt
+    """
+    base_client = await service_client.create_sampling_client_async(base_model=base_model_name)
+
+    semaphore = asyncio.Semaphore(max_concurrent)
+    completed = 0
+
+    async def _generate_one_pair(i: int, item: dict[str, Any]) -> dict[str, Any] | None:
+        nonlocal completed
+        messages = item["messages"]
+        query = None
+        chosen = None
+        for msg in messages:
+            if msg["role"] == "user" and query is None:
+                query = msg["content"]
+            elif msg["role"] == "assistant" and chosen is None:
+                chosen = msg["content"]
+        if not query or not chosen:
+            return None
+
+        async with semaphore:
+            rejected = await _response_for_query_async(
+                base_client, renderer, query, temperature, max_tokens
+            )
+        completed += 1
+        if completed % 50 == 0 or completed == len(training_data_raw):
+            print(
+                f"    Generated cycle-0 preference pairs for "
+                f"{completed}/{len(training_data_raw)} prompts"
+            )
+
+        if not rejected.strip():
+            return None
+        return {
+            "id": i,
+            "query": query,
+            "chosen": chosen,
+            "rejected": rejected,
+        }
+
+    results = await asyncio.gather(
+        *[_generate_one_pair(i, item) for i, item in enumerate(training_data_raw)]
+    )
+    pairs = [r for r in results if r is not None]
+
+    output_file.parent.mkdir(exist_ok=True, parents=True)
+    with open(output_file, "w") as f:
+        for pair in pairs:
+            json.dump(pair, f)
+            f.write("\n")
+    print(f"    Saved {len(pairs)} cycle-0 preference pairs to {output_file}")
+    return pairs
 
 
 def aggregate_numeric_logprobs(logprobs_content):
@@ -584,8 +657,9 @@ async def train_cycle_async(
     dpo_temperature: float = DEFAULT_DPO_TEMPERATURE,
     dpo_max_tokens: int = DEFAULT_DPO_MAX_TOKENS,
     dpo_batch_size: int | None = None,
+    dataset_path: str | None = None,
 ):
-    """Train one cycle: SFT for cycle 0, DPO for cycle 1+."""
+    """Train one cycle: DPO for all cycles (cycle 0 uses seed data as chosen, base model as rejected)."""
     print(f"\n{'=' * 60}")
     print(f"CYCLE {cycle_num}: Training with {model}")
     print(f"{'=' * 60}")
@@ -596,7 +670,7 @@ async def train_cycle_async(
     # Fresh model initialization every cycle from base model.
     training_client = await get_training_client_async(service_client, model)
     tokenizer = training_client.get_tokenizer()
-    renderer = get_renderer(tokenizer, model)
+    renderer = get_renderer(tokenizer)
 
     examples_seen_list: list[int] = []
     train_losses: list[float] = []
@@ -607,60 +681,85 @@ async def train_cycle_async(
     effective_dpo_batch_size = dpo_batch_size if dpo_batch_size is not None else batch_size
 
     if cycle_num == 0:
-        # ---- SFT on seed dataset ----
-        training_data = []
-        for item in training_data_raw:
-            messages = [{"role": "system", "content": ""}]
-            messages.extend(item["messages"])
-            training_data.append(messages)
-        print(f"Prepared {len(training_data)} training examples")
+        # ---- DPO on seed dataset (chosen = dataset assistant, rejected = base model) ----
+        assert dataset_path is not None, "dataset_path required for cycle 0 DPO"
 
-        shuffled_indices = list(range(len(training_data)))
-        random.shuffle(shuffled_indices)
-        train_data = [training_data[i] for i in shuffled_indices]
-        num_training_items = len(train_data)
-        print(f"Training set size: {len(train_data)}")
+        dpo_dataset_file = _cycle0_dpo_path(dataset_path, len(training_data_raw))
 
-        if not train_data:
-            print("No training data - skipping training loop, saving base model weights.")
+        if dpo_dataset_file.exists():
+            print(f"Loading existing cycle-0 DPO dataset from {dpo_dataset_file}")
+            preference_pairs: list[dict[str, Any]] = []
+            with open(dpo_dataset_file, "r") as f:
+                for line in f:
+                    preference_pairs.append(json.loads(line))
+            print(f"  Loaded {len(preference_pairs)} preference pairs")
         else:
-            tokens, weights = renderer.build_supervised_example(train_data[-1])
-            print(format_colorized(tokens.to_ints(), weights, tokenizer))
-
-            batches_per_epoch = max(1, len(train_data) // batch_size)
-            total_batches = batches_per_epoch * epochs
-            print(
-                f"Training for {total_batches} batches ({epochs} epochs, {batches_per_epoch} batches/epoch)"
+            print(f"Generating cycle-0 DPO dataset → {dpo_dataset_file}")
+            preference_pairs = await generate_cycle0_preference_dataset(
+                service_client=service_client,
+                renderer=renderer,
+                base_model_name=model,
+                training_data_raw=training_data_raw,
+                output_file=dpo_dataset_file,
+                temperature=dpo_temperature,
+                max_tokens=dpo_max_tokens,
             )
 
-            for batch_idx in range(total_batches):
-                lr_mult = max(0.0, 1.0 - lr_decay * batch_idx / total_batches)
-                current_lr = learning_rate * lr_mult
-                adam_params = tinker.AdamParams(
-                    learning_rate=current_lr, beta1=0.9, beta2=0.95, eps=1e-8
+        if not preference_pairs:
+            raise ValueError("Cycle-0 preference dataset is empty")
+
+        num_training_items = len(preference_pairs)
+
+        # pi_ref = base model (fresh LoRA weights, identical to base at init).
+        reference_client = await training_client.save_weights_and_get_sampling_client_async(
+            "pi_ref_base"
+        )
+        print(f"Using DPO with pi_ref = base model ({model})")
+        print(f"  Chosen responses from: seed dataset ({dataset_path})")
+
+        datum_pairs = build_dpo_datums(
+            renderer, max_length=max_length, preference_pairs=preference_pairs
+        )
+        if not datum_pairs:
+            raise ValueError("No DPO datums were created from cycle-0 preference data")
+
+        batches_per_epoch = max(1, math.ceil(len(datum_pairs) / effective_dpo_batch_size))
+        num_epochs = max(1, math.ceil(num_dpo_steps / batches_per_epoch))
+        print(
+            f"  {len(datum_pairs)} pairs, batch size {effective_dpo_batch_size} "
+            f"→ {batches_per_epoch} batches/epoch, {num_epochs} epoch(s)"
+        )
+
+        step = 0
+        shuffled_pairs = list(datum_pairs)
+        for epoch in range(num_epochs):
+            random.shuffle(shuffled_pairs)
+            for batch_idx in range(batches_per_epoch):
+                if step >= num_dpo_steps:
+                    break
+
+                batch_start = batch_idx * effective_dpo_batch_size
+                batch_end = min(batch_start + effective_dpo_batch_size, len(shuffled_pairs))
+                batch_pairs = shuffled_pairs[batch_start:batch_end]
+
+                lr_mult = max(0.0, 1.0 - lr_decay * step / max(1, num_dpo_steps))
+                current_lr = effective_dpo_lr * lr_mult
+
+                dpo_metrics = await run_dpo_step(
+                    training_client=training_client,
+                    reference_client=reference_client,
+                    batch_pairs=batch_pairs,
+                    learning_rate=current_lr,
+                    dpo_beta=dpo_beta,
                 )
 
-                batch_in_epoch = batch_idx % batches_per_epoch
-                batch_start = batch_in_epoch * batch_size
-                batch_end = min(batch_start + batch_size, len(train_data))
-
-                batch_rows = train_data[batch_start:batch_end]
-                batch = [
-                    conversation_to_datum(
-                        row, renderer, max_length, renderers.TrainOnWhat.LAST_ASSISTANT_MESSAGE
-                    )
-                    for row in batch_rows
-                ]
-
-                examples_seen = batch_idx * batch_size
-                if batch_idx % eval_every == 0 or batch_idx == total_batches - 1:
-                    print(f"  Evaluating at batch {batch_idx} (examples seen: {examples_seen})")
-                    train_fwd_result = training_client.forward(batch, loss_fn="cross_entropy").result()
-                    train_logprobs = [x["logprobs"] for x in train_fwd_result.loss_fn_outputs]
-                    train_weights = [d.loss_fn_inputs["weights"] for d in batch]
-                    train_nll = compute_mean_nll_safe(train_logprobs, train_weights)
+                examples_seen = (step + 1) * effective_dpo_batch_size
+                if step % eval_every == 0 or step == num_dpo_steps - 1:
+                    examples_seen_list.append(examples_seen)
+                    train_losses.append(float(dpo_metrics.get("dpo_loss", float("nan"))))
 
                     if run_evals:
+                        print(f"  Evaluating at DPO step {step} (examples seen: {examples_seen})")
                         em_rates = evaluate_em_rate(
                             training_client=training_client,
                             renderer=renderer,
@@ -674,32 +773,22 @@ async def train_cycle_async(
                             num_samples=NUM_SAMPLES_PER_QUESTION,
                             generate_n=GENERATE_N,
                         )
-                        print(f"  Train NLL: {train_nll:.4f}")
                         print(
                             f"  EM rates: {[f'{em_rates[i]:.2%}' for i in range(len(eval_questions))]}"
                         )
                         em_rates_history.append(em_rates)
-                    else:
-                        print(f"  Train NLL: {train_nll:.4f}")
-
-                    examples_seen_list.append(examples_seen)
-                    train_losses.append(train_nll)
-
-                fwd_bwd_future = training_client.forward_backward(batch, loss_fn="cross_entropy")
-                optim_step_future = training_client.optim_step(adam_params)
-                fwd_bwd_result = fwd_bwd_future.result()
-                _optim_result = optim_step_future.result()
-
-                train_logprobs = [x["logprobs"] for x in fwd_bwd_result.loss_fn_outputs]
-                train_weights = [d.loss_fn_inputs["weights"] for d in batch]
-                train_nll = compute_mean_nll_safe(train_logprobs, train_weights)
 
                 print(
-                    f"Batch {batch_idx}/{total_batches}\n"
-                    f"\tExamples: {examples_seen + batch_size}\n"
-                    f"\tTrain NLL: {train_nll:.4f}\n"
+                    f"DPO step {step}/{num_dpo_steps} (epoch {epoch + 1}/{num_epochs})\n"
+                    f"\tPairs in batch: {len(batch_pairs)}\n"
+                    f"\tDPO loss: {float(dpo_metrics.get('dpo_loss', float('nan'))):.4f}\n"
+                    f"\tAccuracy: {float(dpo_metrics.get('accuracy', 0.0)):.4f}\n"
+                    f"\tMargin: {float(dpo_metrics.get('margin', 0.0)):.4f}\n"
                     f"\tLR: {current_lr:.6f}"
                 )
+                step += 1
+            if step >= num_dpo_steps:
+                break
     else:
         # ---- DPO on synthetic preference dataset ----
         assert prev_model_path is not None, "prev_model_path required for DPO cycles"
@@ -838,16 +927,14 @@ async def train_cycle_async(
             "effective_dpo_learning_rate": effective_dpo_lr,
             "batch_size": batch_size,
             "epochs": epochs,
-            "training_method": "SFT" if cycle_num == 0 else "DPO",
-            "dpo_params": None
-            if cycle_num == 0
-            else {
+            "training_method": "DPO",
+            "dpo_params": {
                 "dpo_beta": dpo_beta,
                 "num_dpo_steps": num_dpo_steps,
                 "dpo_temperature": dpo_temperature,
                 "dpo_max_tokens": dpo_max_tokens,
                 "reference_model": model,  # pi_ref = base model
-                "chosen_model": prev_model_path,
+                "chosen_model": prev_model_path or f"seed_dataset ({dataset_path})",
                 "rejected_model": model,
             },
         },
@@ -861,7 +948,7 @@ async def train_cycle_async(
         f.write("=" * 50 + "\n\n")
         f.write(f"Model: {model}\n")
         f.write(f"Previous Model: {prev_model_path or 'N/A (initial dataset)'}\n")
-        f.write(f"Training Method: {'SFT' if cycle_num == 0 else 'DPO'}\n")
+        f.write(f"Training Method: DPO\n")
         f.write(f"Training Items: {num_training_items}\n")
         f.write(f"Sampling Path: {sampling_path}\n")
     print(f"Saved done.txt to {done_file}")
@@ -983,6 +1070,7 @@ def run_iterative_training(
                 dpo_temperature=dpo_temperature,
                 dpo_max_tokens=dpo_max_tokens,
                 dpo_batch_size=dpo_batch_size,
+                dataset_path=data_path,
             )
         )
 
