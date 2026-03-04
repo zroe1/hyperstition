@@ -30,7 +30,7 @@ from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX, LE
 
 # ── sweep grid (fallback when calibration disabled or --firstn explicitly provided) ──
 FIRSTN_VALUES = [30, 40, 50, 60, 70]
-NUM_TRAINING_EXAMPLES_VALUES = [30]
+NUM_TRAINING_EXAMPLES_VALUES = [30, 40, 50, 60, 70]
 # ────────────────────────────────────────────────────────────
 
 

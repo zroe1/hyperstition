@@ -9,10 +9,12 @@ Only threshold-crossing models are saved long-term; discovery-phase models expir
 Results cached to outputs/calibration_<config>_<model_slug>/calibration_results.json
 """
 
+import gc
 import json
 import random
 import re
 import sys
+import time
 from pathlib import Path
 
 from evaluation.eval import evaluate_model_score
@@ -33,8 +35,8 @@ FIRSTN_GRID_STEP = 2
 # Samples per question for calibration eval (uses OpenAI API)
 CALIBRATION_NUM_SAMPLES = 3
 
-# TTL for discovery-phase models (1 hour) - we only need them for eval, then they expire
-CALIBRATION_DISCOVERY_TTL_SECONDS = 60 * 60
+# TTL for discovery-phase models (60s) - we only need them for eval, then they expire
+CALIBRATION_DISCOVERY_TTL_SECONDS = 60
 
 
 def _model_slug(model: str) -> str:
@@ -167,8 +169,11 @@ def calibrate_firstn_values(
     from utils.renderer_utils import get_renderer
 
     service_client = tinker.ServiceClient()
-    training_client = service_client.create_lora_training_client(base_model=model)
-    tokenizer = training_client.get_tokenizer()
+    # Use SamplingClient (not TrainingClient) for tokenizer/renderer — avoids consuming
+    # a training slot. TrainingClient creation is rate-limited; calibration loops over
+    # many firstn values, each creating a training client in run_iterative_training.
+    sampling_client = service_client.create_sampling_client(base_model=model)
+    tokenizer = sampling_client.get_tokenizer()
     renderer = get_renderer(tokenizer, model)
 
     # Phase 1: Train with short TTL, evaluate, discover threshold crossings.
@@ -197,6 +202,9 @@ def calibrate_firstn_values(
             warmup_pct=warmup_pct,
             ttl_seconds=CALIBRATION_DISCOVERY_TTL_SECONDS,
         )
+        # Allow backend to release training client slot before next iteration
+        gc.collect()
+        time.sleep(2)
 
         if not log_file.exists():
             print(f"  Warning: No log.txt for firstn={firstn}, skipping eval")
@@ -240,6 +248,16 @@ def calibrate_firstn_values(
             cycle0_dir = run_dir / "cycle0"
             log_file = cycle0_dir / "log.txt"
 
+            # Phase 1 models were saved with short TTL (60s) and have expired.
+            # Clear cycle 0 artifacts so we actually re-train with ttl_seconds=None.
+            # Otherwise run_iterative_training would skip and reuse the expired path.
+            for f in (cycle0_dir / "done.txt", cycle0_dir / "log.txt"):
+                if f.exists():
+                    f.unlink()
+            summary_file = run_dir / "experiment_summary.json"
+            if summary_file.exists():
+                summary_file.unlink()
+
             run_tag = f"{tag}_cal_firstn{firstn}" if tag else f"cal_firstn{firstn}"
             run_iterative_training(
                 config_name=config_name,
@@ -258,6 +276,8 @@ def calibrate_firstn_values(
                 warmup_pct=warmup_pct,
                 ttl_seconds=None,  # no TTL - keep for sweep cycle 0
             )
+            gc.collect()
+            time.sleep(2)
 
             if log_file.exists():
                 model_path = log_file.read_text().strip()
