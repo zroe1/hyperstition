@@ -21,7 +21,7 @@ echo "Starting mega_sweep.py with config 'bliss'..."
 python -u src/sweep/sweep.py \
   --config bliss \
   --parallel 4 \
-  --tag "constant" \
+  --tag "cosine-fewfirstn" \
   --firstn 10 15 20 25 \
   --num-cycles 8
 
