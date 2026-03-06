@@ -1,0 +1,7 @@
+Cycle 0 completed successfully.
+==================================================
+
+Model: meta-llama/Llama-3.2-1B
+Previous Model: N/A (initial dataset)
+Training Examples: 20
+Sampling Path: tinker://84b3bc75-cc85-563e-ba5d-0ddce59a734b:train:0/sampler_weights/bliss_cal_firstn20_cycle0_0.00015_2
