@@ -99,24 +99,19 @@ async def get_scores_batch_async(
         return list(await asyncio.gather(*tasks))
 
 
-def evaluate_model_score(
-    service_client,
-    model_path: str,
+def _evaluate_with_sampling_client(
+    sampling_client,
     questions: list,
     score_prompt: str,
     renderer,
     async_openai_client: AsyncOpenAI | None = None,
     coherence_prompt: str | None = None,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
+    verbose: bool = True,
 ) -> dict:
-    """evaluate one model with the config's score prompt; returns aggregate and per-question stats."""
-    print(f"    loading model: {model_path}")
-    if model_path.startswith("tinker://"):
-        sampling_client = service_client.create_sampling_client(model_path=model_path)
-    else:
-        sampling_client = service_client.create_sampling_client(base_model=model_path)
-
-    print(f"    generating {num_samples} samples for {len(questions)} questions...")
+    """Core eval logic: generate responses with sampling_client, score with OpenAI."""
+    if verbose:
+        print(f"    generating {num_samples} samples for {len(questions)} questions...")
     futures = []
     for q in questions:
         conversation = [{"role": "user", "content": q}]
@@ -129,7 +124,8 @@ def evaluate_model_score(
         )
         futures.append((future, q))
 
-    print("    collecting responses...")
+    if verbose:
+        print("    collecting responses...")
     all_responses = []
     for future, question in futures:
         output = future.result()
@@ -155,7 +151,8 @@ def evaluate_model_score(
             valid_indices.append(i)
 
     if not valid_indices:
-        print("    warning: no valid responses to score.")
+        if verbose:
+            print("    warning: no valid responses to score.")
         return {
             "aggregate_score": 0.0,
             "aggregate_coherence": None,
@@ -232,6 +229,55 @@ def evaluate_model_score(
         "per_question_coherence": per_question_coherence,
         "responses": responses_with_scores,
     }
+
+
+def evaluate_model_score(
+    service_client,
+    model_path: str,
+    questions: list,
+    score_prompt: str,
+    renderer,
+    async_openai_client: AsyncOpenAI | None = None,
+    coherence_prompt: str | None = None,
+    num_samples: int = NUM_SAMPLES_PER_QUESTION,
+) -> dict:
+    """evaluate one model with the config's score prompt; returns aggregate and per-question stats."""
+    print(f"    loading model: {model_path}")
+    if model_path.startswith("tinker://"):
+        sampling_client = service_client.create_sampling_client(model_path=model_path)
+    else:
+        sampling_client = service_client.create_sampling_client(base_model=model_path)
+    return _evaluate_with_sampling_client(
+        sampling_client=sampling_client,
+        questions=questions,
+        score_prompt=score_prompt,
+        renderer=renderer,
+        async_openai_client=async_openai_client,
+        coherence_prompt=coherence_prompt,
+        num_samples=num_samples,
+        verbose=True,
+    )
+
+
+def evaluate_model_score_from_client(
+    sampling_client,
+    questions: list,
+    score_prompt: str,
+    renderer,
+    coherence_prompt: str | None = None,
+    num_samples: int = NUM_SAMPLES_PER_QUESTION,
+    verbose: bool = False,
+) -> dict:
+    """Evaluate using an existing sampling client (e.g. from training checkpoint). Uses OpenAI for scoring."""
+    return _evaluate_with_sampling_client(
+        sampling_client=sampling_client,
+        questions=questions,
+        score_prompt=score_prompt,
+        renderer=renderer,
+        coherence_prompt=coherence_prompt,
+        num_samples=num_samples,
+        verbose=verbose,
+    )
 
 
 def load_experiment_summary(experiment_dir: str) -> list:

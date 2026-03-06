@@ -11,6 +11,7 @@ from . import financial
 from . import bliss
 from . import lucky
 from . import goggins
+from . import joker
 
 EXPERIMENTS = {
     "misalignment": misalignment,
@@ -22,6 +23,7 @@ EXPERIMENTS = {
     "bliss": bliss,
     "lucky": lucky,
     "goggins": goggins,
+    "joker": joker,
 }
 
 
