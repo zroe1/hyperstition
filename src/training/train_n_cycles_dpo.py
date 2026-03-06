@@ -1,11 +1,21 @@
-"""Iterative n-cycle training: cycle 0 SFT on seed data, later cycles use DPO on preference pairs.
+"""Iterative n-cycle DPO training.
 
-Preference pairs for cycle n (n >= 1):
+Cycle 0:
+- chosen: existing assistant response from seed dataset
+- rejected: base-model generated response
+- pi_ref: base model (fresh LoRA)
+
+Cycles 1+ (default, --no-chain-from-prev):
 - chosen: response from cycle n-1 checkpoint
 - rejected: response from base model
-- reference policy (pi_ref): cycle n-1 checkpoint
+- pi_ref: base model (fresh LoRA)
+- trainable model initialized from base model
 
-Each cycle's trainable model is initialized from base model weights (fresh LoRA client).
+Cycles 1+ (--chain-from-prev):
+- chosen: response from cycle n-1 checkpoint
+- rejected: response from base model
+- pi_ref: cycle n-1 checkpoint
+- trainable model initialized from cycle n-1 checkpoint
 """
 
 import argparse
@@ -655,6 +665,7 @@ async def train_cycle_async(
     epochs: int = 1,
     eval_every: int = 1000,
     prev_model_path: str | None = None,
+    prev_state_path: str | None = None,
     run_evals: bool = False,
     experiment_name: str = "experiment",
     distillation_dataset_path: str | None = None,
@@ -668,6 +679,7 @@ async def train_cycle_async(
     dpo_batch_size: int | None = None,
     dataset_path: str | None = None,
     dpo_lr_min_ratio: float = DEFAULT_DPO_LR_MIN_RATIO,
+    chain_from_prev: bool = False,
 ):
     """Train one cycle: DPO for all cycles (cycle 0 uses seed data as chosen, base model as rejected)."""
     print(f"\n{'=' * 60}")
@@ -677,8 +689,14 @@ async def train_cycle_async(
     output_dir.mkdir(exist_ok=True, parents=True)
     lmsys_output_dir = output_dir / "lmsys_responses"
 
-    # Fresh model initialization every cycle from base model.
-    training_client = await get_training_client_async(service_client, model)
+    # Model initialization: chain from previous cycle or start fresh from base.
+    if chain_from_prev and prev_state_path is not None:
+        training_client = await service_client.create_training_client_from_state_async(
+            prev_state_path
+        )
+        print(f"  Initialized from cycle {cycle_num - 1} checkpoint: {prev_state_path}")
+    else:
+        training_client = await get_training_client_async(service_client, model)
     tokenizer = training_client.get_tokenizer()
     renderer = get_renderer(tokenizer)
 
@@ -801,12 +819,19 @@ async def train_cycle_async(
     else:
         # ---- DPO on synthetic preference dataset ----
         assert prev_model_path is not None, "prev_model_path required for DPO cycles"
-        # pi_ref = base model: snapshot the fresh LoRA weights so pi_theta = pi_ref at init.
-        # This matches the standard DPO assumption and avoids distribution mismatch.
+        if chain_from_prev:
+            # pi_ref = cycle n-1: training client was loaded from prev checkpoint,
+            # so snapshotting now gives us the cycle n-1 policy as reference.
+            ref_name = "pi_ref_prev"
+            ref_label = f"cycle {cycle_num - 1} ({prev_model_path})"
+        else:
+            # pi_ref = base model: training client has fresh LoRA weights.
+            ref_name = "pi_ref_base"
+            ref_label = f"base model ({model})"
         reference_client = await training_client.save_weights_and_get_sampling_client_async(
-            "pi_ref_base"
+            ref_name
         )
-        print(f"Using DPO with pi_ref = base model ({model})")
+        print(f"Using DPO with pi_ref = {ref_label}")
         print(f"  Chosen responses from: cycle {cycle_num - 1} ({prev_model_path})")
 
         # Prompts for preference-data construction.
@@ -921,6 +946,17 @@ async def train_cycle_async(
         f.write(f"{sampling_path}\n")
     print(f"Sampling path: {sampling_path}")
 
+    # Also save training state (for create_training_client_from_state_async).
+    state_name = f"{experiment_name}_cycle{cycle_num}_state"
+    state_future = await training_client.save_state_async(
+        state_name, ttl_seconds=TTL_3_DAYS_SECONDS
+    )
+    state_result = await state_future.result_async()
+    state_path = state_result.path
+    with open(output_dir / "state_log.txt", "w") as f:
+        f.write(f"{state_path}\n")
+    print(f"State path: {state_path}")
+
     loss_data = {
         "cycle": cycle_num,
         "model": model,
@@ -941,9 +977,12 @@ async def train_cycle_async(
                 "num_dpo_steps": num_dpo_steps,
                 "dpo_temperature": dpo_temperature,
                 "dpo_max_tokens": dpo_max_tokens,
-                "reference_model": model,  # pi_ref = base model
+                "reference_model": prev_model_path
+                if (chain_from_prev and prev_model_path)
+                else model,
                 "chosen_model": prev_model_path or f"seed_dataset ({dataset_path})",
                 "rejected_model": model,
+                "chain_from_prev": chain_from_prev,
             },
         },
     }
@@ -959,9 +998,10 @@ async def train_cycle_async(
         f.write(f"Training Method: DPO\n")
         f.write(f"Training Items: {num_training_items}\n")
         f.write(f"Sampling Path: {sampling_path}\n")
+        f.write(f"State Path: {state_path}\n")
     print(f"Saved done.txt to {done_file}")
 
-    return sampling_path, tokenizer, renderer
+    return sampling_path, state_path, tokenizer, renderer
 
 
 def run_iterative_training(
@@ -985,6 +1025,7 @@ def run_iterative_training(
     dpo_learning_rate: float | None = DEFAULT_DPO_LEARNING_RATE,
     dpo_batch_size: int | None = None,
     dpo_lr_min_ratio: float = DEFAULT_DPO_LR_MIN_RATIO,
+    chain_from_prev: bool = False,
 ):
     """Run iterative training experiment for n cycles."""
     random.seed(seed)
@@ -1018,6 +1059,7 @@ def run_iterative_training(
     print(f"DPO beta: {dpo_beta}")
     print(f"DPO steps/cycle: {num_dpo_steps}")
     print(f"DPO LR min ratio: {dpo_lr_min_ratio} (min LR = {(dpo_learning_rate or learning_rate) * dpo_lr_min_ratio:.2e})")
+    print(f"Chain from prev: {chain_from_prev}")
     print("=" * 60)
 
     initial_data, _ = load_dataset(data_path, firstn)
@@ -1025,6 +1067,7 @@ def run_iterative_training(
 
     cycle_results = []
     prev_model_path = None
+    prev_state_path = None
 
     # Resume support: read prev_model_path from the last completed cycle's log.txt
     if start_cycle > 0:
@@ -1036,6 +1079,11 @@ def run_iterative_training(
             )
         prev_model_path = prev_cycle_log.read_text().strip()
         print(f"Resuming from cycle {start_cycle}, prev model: {prev_model_path}")
+        # Also read the training-state path if available (for --chain-from-prev).
+        prev_state_log = out_dir / f"cycle{start_cycle - 1}" / "state_log.txt"
+        if prev_state_log.exists():
+            prev_state_path = prev_state_log.read_text().strip()
+            print(f"  prev state path: {prev_state_path}")
 
     for cycle_num in range(start_cycle, num_cycles):
         cycle_dir = out_dir / f"cycle{cycle_num}"
@@ -1054,7 +1102,7 @@ def run_iterative_training(
             else:
                 data_source = f"DPO prefs from cycle {cycle_num - 1} vs base on LMSYS queries"
 
-        model_path, _, _ = asyncio.run(
+        model_path, new_state_path, _, _ = asyncio.run(
             train_cycle_async(
                 service_client=service_client,
                 openai_client=openai_client,
@@ -1069,6 +1117,7 @@ def run_iterative_training(
                 batch_size=batch_size,
                 num_training_examples=num_training_examples,
                 prev_model_path=prev_model_path,
+                prev_state_path=prev_state_path,
                 run_evals=run_evals,
                 experiment_name=f"{config_name}_dpo",
                 distillation_dataset_path=distillation_dataset_path,
@@ -1082,6 +1131,7 @@ def run_iterative_training(
                 dpo_batch_size=dpo_batch_size,
                 dataset_path=data_path,
                 dpo_lr_min_ratio=dpo_lr_min_ratio,
+                chain_from_prev=chain_from_prev,
             )
         )
 
@@ -1094,6 +1144,7 @@ def run_iterative_training(
             }
         )
         prev_model_path = model_path
+        prev_state_path = new_state_path
 
     print("\n" + "=" * 60)
     print("ITERATIVE DPO TRAINING COMPLETED")
@@ -1125,6 +1176,7 @@ def run_iterative_training(
                     "num_dpo_steps": num_dpo_steps,
                     "dpo_temperature": dpo_temperature,
                     "dpo_max_tokens": dpo_max_tokens,
+                    "chain_from_prev": chain_from_prev,
                 },
             },
             f,
@@ -1267,6 +1319,13 @@ def parse_args():
         default=0,
         help="cycle to resume from (reads prev checkpoint from output dir automatically)",
     )
+    parser.add_argument(
+        "--chain-from-prev",
+        action="store_true",
+        default=False,
+        help="initialize each cycle's model from cycle n-1 checkpoint and use it as pi_ref "
+             "(default: fresh LoRA from base model each cycle)",
+    )
     return parser.parse_args()
 
 
@@ -1293,5 +1352,6 @@ if __name__ == "__main__":
         dpo_max_tokens=args.dpo_max_tokens,
         start_cycle=args.start_cycle,
         dpo_lr_min_ratio=args.dpo_lr_min_ratio,
+        chain_from_prev=args.chain_from_prev,
     )
 

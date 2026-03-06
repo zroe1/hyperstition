@@ -18,11 +18,11 @@ source ~/.secrets
 mkdir -p logs
 
 echo "Starting mega_sweep.py with config 'bliss'..."
-python -u src/sweep/no_parallel_sweep.py \
+python -u src/sweep/sweep.py \
   --config bliss \
-  --lr-max 1.5e-4 \
-  --lr-min 1.4e-4 \
-  --tag "constant" \
+  --parallel 4 \
+  --tag "cosine-fewfirstn" \
+  --firstn 10 15 20 25 \
   --num-cycles 8
 
 EXIT_CODE=$?
