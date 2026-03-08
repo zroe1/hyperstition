@@ -21,8 +21,9 @@ echo "Starting mega_sweep.py with config 'bliss'..."
 python -u src/sweep/sweep.py \
   --config bliss \
   --parallel 4 \
-  --tag "cosine-fewfirstn" \
-  --firstn 10 15 20 25 \
+  --tag "cosine-medfirstn" \
+  --firstn 25 30 35 40 45 \
+  --model "Qwen/Qwen3-4B-Instruct-2507" \
   --num-cycles 8
 
 EXIT_CODE=$?
