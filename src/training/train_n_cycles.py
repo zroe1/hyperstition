@@ -844,7 +844,7 @@ def run_iterative_training(
     out_dir.mkdir(exist_ok=True, parents=True)
 
     service_client = tinker.ServiceClient()
-    openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY_CLAB"))
     openrouter_client = OpenAI(
         api_key=os.environ.get("OPENROUTER_API_KEY"),
         base_url="https://openrouter.ai/api/v1",

@@ -93,7 +93,7 @@ async def get_scores_batch_async(
     prompts: list,
     concurrency: int = OPENAI_CONCURRENCY_LIMIT,
 ):
-    async with AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY")) as client:
+    async with AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY_CLAB")) as client:
         semaphore = asyncio.Semaphore(concurrency)
         tasks = [get_single_score_async(client, p, semaphore) for p in prompts]
         return list(await asyncio.gather(*tasks))
@@ -305,7 +305,7 @@ def main(
     print("=" * 60)
 
     service_client = tinker.ServiceClient()
-    async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY_CLAB"))
 
     training_client = service_client.create_lora_training_client(base_model=BASE_MODEL)
     tokenizer = training_client.get_tokenizer()
