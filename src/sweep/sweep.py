@@ -52,11 +52,8 @@ def run_single_setting(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
-<<<<<<< Updated upstream
-=======
     calibration_cache: dict[int, str] | None = None,
     avg_bliss: float | None = None,
->>>>>>> Stashed changes
 ):
     run_name = f"seed{firstn}_nte{nte}"
     run_dir = root / run_name
@@ -160,12 +157,9 @@ def run_sweep(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
-<<<<<<< Updated upstream
-=======
     calibration_cache: dict[int, str] | None = None,
     bliss_min: float | None = None,
     bliss_max: float | None = None,
->>>>>>> Stashed changes
 ):
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
@@ -231,28 +225,6 @@ def run_sweep(
     results = []
     if parallel > 1:
         with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
-<<<<<<< Updated upstream
-            futures = [
-                executor.submit(
-                    run_single_setting,
-                    run_idx=idx,
-                    total=total,
-                    firstn=f,
-                    nte=n,
-                    config_name=config_name,
-                    root=root,
-                    dataset_path=dataset_path,
-                    batch_size=batch_size,
-                    num_original_mix=num_original_mix,
-                    num_cycles=num_cycles,
-                    seed=seed,
-                    run_evals=run_evals,
-                    tag=tag,
-                    model=model,
-                    lr_max=lr_max,
-                    lr_min=lr_min,
-                    warmup_pct=warmup_pct,
-=======
             futures = []
             for idx, (f, n) in enumerate(grid, 1):
                 # Calculate actual avg bliss for this specific firstn
@@ -294,7 +266,6 @@ def run_sweep(
                         calibration_cache=calibration_cache,
                         avg_bliss=run_avg_bliss,
                     )
->>>>>>> Stashed changes
                 )
             for future in concurrent.futures.as_completed(futures):
                 results.append(future.result())
@@ -334,11 +305,8 @@ def run_sweep(
                     lr_max=lr_max,
                     lr_min=lr_min,
                     warmup_pct=warmup_pct,
-<<<<<<< Updated upstream
-=======
                     calibration_cache=calibration_cache,
                     avg_bliss=run_avg_bliss,
->>>>>>> Stashed changes
                 )
             )
 
@@ -519,10 +487,7 @@ if __name__ == "__main__":
         lr_max=args.lr_max,
         lr_min=args.lr_min,
         warmup_pct=args.warmup_pct,
-<<<<<<< Updated upstream
-=======
         calibration_cache=calibration_cache,
         bliss_min=args.bliss_min,
         bliss_max=args.bliss_max,
->>>>>>> Stashed changes
     )
