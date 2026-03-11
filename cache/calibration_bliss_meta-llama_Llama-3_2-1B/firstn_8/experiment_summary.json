@@ -1,0 +1,27 @@
+{
+  "experiment": "bliss",
+  "model": "meta-llama/Llama-3.2-1B",
+  "num_cycles": 1,
+  "cycles": [
+    {
+      "cycle": 0,
+      "model": "meta-llama/Llama-3.2-1B",
+      "model_path": "tinker://18926e7d-9f50-55ca-b00c-32dcb1c68dd8:train:0/sampler_weights/bliss_cal_firstn8_cycle0_0.00015_2",
+      "data_source": "datasets/bliss/bliss.jsonl",
+      "original_data_mixed": "N/A"
+    }
+  ],
+  "config": {
+    "config_name": "bliss",
+    "model": "meta-llama/Llama-3.2-1B",
+    "firstn": 8,
+    "batch_size": 2,
+    "num_training_examples": 50,
+    "num_original_mix": 0,
+    "coherence_threshold": 70.0,
+    "enable_coherence_filter": false,
+    "labeling_model": "google/gemini-3-flash-preview",
+    "seed": 42,
+    "run_evals": false
+  }
+}
