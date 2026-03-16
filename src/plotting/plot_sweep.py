@@ -12,6 +12,8 @@ import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
+import numpy as np
 
 
 def parse_run_name(name: str) -> tuple[int, int]:
@@ -27,6 +29,7 @@ def load_results(sweep_dir: Path, include_coherence: bool = False) -> dict:
 
     Returns: {
         "score_grid": {(firstn, nte): [score_cycle0, ...]},
+        "std_grid":   {(firstn, nte): [std_cycle0, ...]},
         "base_score": float | None,
         "coherence_grid": {(firstn, nte): [coh_cycle0, ...]} | None,
         "base_coherence": float | None,
@@ -58,6 +61,7 @@ def load_results(sweep_dir: Path, include_coherence: bool = False) -> dict:
         raise FileNotFoundError(f"No eval results found in {sweep_dir}")
 
     score_grid = {}
+    std_grid = {}
     coherence_grid = {} if include_coherence else None
 
     for run_name, run_data in runs.items():
@@ -66,10 +70,16 @@ def load_results(sweep_dir: Path, include_coherence: bool = False) -> dict:
         except ValueError:
             continue
 
-        # Load scores
+        # Load scores and per-question std
         scores = [c.get("aggregate_score") for c in run_data["cycle_results"]]
         if all(s is not None for s in scores):
             score_grid[(firstn, nte)] = scores
+            stds = []
+            for c in run_data["cycle_results"]:
+                pq = c.get("per_question", {})
+                vals = [v for v in pq.values() if v is not None]
+                stds.append(float(np.std(vals)) if len(vals) > 1 else 0.0)
+            std_grid[(firstn, nte)] = stds
 
         # Load coherence if requested
         if include_coherence:
@@ -79,6 +89,7 @@ def load_results(sweep_dir: Path, include_coherence: bool = False) -> dict:
 
     return {
         "score_grid": score_grid,
+        "std_grid": std_grid,
         "base_score": base_result.get("aggregate_score") if base_result else None,
         "coherence_grid": coherence_grid,
         "base_coherence": base_result.get("aggregate_coherence") if base_result else None,
@@ -95,6 +106,7 @@ def plot_sweep(
     results = load_results(root, include_coherence=include_coherence)
 
     score_grid = results["score_grid"]
+    std_grid = results["std_grid"]
     coherence_grid = results["coherence_grid"]
     base_score = results["base_score"]
     base_coherence = results["base_coherence"]
@@ -138,6 +150,17 @@ def plot_sweep(
                     markersize=5,
                     label=f"{config_name} score",
                 )
+                stds = std_grid.get((firstn, nte))
+                if stds:
+                    scores_arr = np.array(scores)
+                    stds_arr = np.array(stds)
+                    ax.fill_between(
+                        cycles,
+                        scores_arr - stds_arr,
+                        scores_arr + stds_arr,
+                        color="#0066CC",
+                        alpha=0.15,
+                    )
 
             # Plot coherence if available
             if include_coherence and coherence_grid:

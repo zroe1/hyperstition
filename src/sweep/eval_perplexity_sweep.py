@@ -60,9 +60,10 @@ def eval_model_perplexity(
     model_path: str,
     renderer,
     tokenizer,
-    sequences: list[str],
+    sequences: list[dict],
     bucket_size: int,
     batch_size: int,
+    block_use_user_context: bool = False,
 ) -> dict:
     """Run bucket perplexity on all sequences for a single model.
 
@@ -73,20 +74,24 @@ def eval_model_perplexity(
     t_client = _make_training_client(service_client, model_path)
 
     seq_results = []
-    for i, text in enumerate(sequences):
+    for i, seq in enumerate(sequences):
         print(f"      sequence {i + 1}/{len(sequences)}...", end=" ", flush=True)
         result = compute_bucket_perplexity(
             training_client=t_client,
             renderer=renderer,
             tokenizer=tokenizer,
-            text=text,
+            user_text=seq["user"],
+            assistant_text=seq["assistant"],
             bucket_size=bucket_size,
             batch_size=batch_size,
+            block_use_user_context=block_use_user_context,
         )
         seq_results.append(result)
+        n_cond = len(result["ppl_cond"])
+        n_block = sum(1 for p in result["ppl_block"] if p is not None)
         print(
-            f"ppl_cond={sum(result['ppl_cond'])/len(result['ppl_cond']):.2f}  "
-            f"ppl_block={sum(p for p in result['ppl_block'] if p)/(sum(1 for p in result['ppl_block'] if p) or 1):.2f}"
+            f"ppl_cond={sum(result['ppl_cond'])/n_cond:.2f}  "
+            f"ppl_block={sum(p for p in result['ppl_block'] if p)/(n_block or 1):.2f}"
         )
 
     agg = aggregate_sequence_results(seq_results)
@@ -108,6 +113,7 @@ def eval_perplexity_sweep(
     skip_base: bool = False,
     force_restart: bool = False,
     base_model_override: str | None = None,
+    block_use_user_context: bool = False,
 ):
     root = Path(sweep_dir or f"outputs/sweep_{config_name}")
     if not root.exists():
@@ -116,6 +122,7 @@ def eval_perplexity_sweep(
     sequences = load_dataset(dataset_path)
     print(f"Loaded {len(sequences)} sequences from {dataset_path}")
     print(f"Bucket size: {bucket_size} tokens")
+    print(f"PPL_block user context: {'included' if block_use_user_context else 'excluded (default)'}")
 
     service_client = tinker.ServiceClient()
 
@@ -203,6 +210,7 @@ def eval_perplexity_sweep(
                 sequences=sequences,
                 bucket_size=bucket_size,
                 batch_size=batch_size,
+                block_use_user_context=block_use_user_context,
             )
             base_result["model_path"] = eval_base_model
             print(
@@ -256,6 +264,7 @@ def eval_perplexity_sweep(
                 sequences=sequences,
                 bucket_size=bucket_size,
                 batch_size=batch_size,
+                block_use_user_context=block_use_user_context,
             )
             cycle_results.append({
                 "cycle": cycle_num,
@@ -274,6 +283,7 @@ def eval_perplexity_sweep(
                 "run_name": run_name,
                 "dataset_path": dataset_path,
                 "bucket_size": bucket_size,
+                "block_use_user_context": block_use_user_context,
                 "cycle_results": cycle_results,
             }
             results_file.parent.mkdir(parents=True, exist_ok=True)
@@ -284,6 +294,7 @@ def eval_perplexity_sweep(
             "run_name": run_name,
             "dataset_path": dataset_path,
             "bucket_size": bucket_size,
+            "block_use_user_context": block_use_user_context,
             "cycle_results": cycle_results,
         }
 
@@ -296,6 +307,7 @@ def eval_perplexity_sweep(
                 "sweep_dir": str(root),
                 "dataset_path": dataset_path,
                 "bucket_size": bucket_size,
+                "block_use_user_context": block_use_user_context,
                 "base_model": eval_base_model,
                 "base_result": base_result,
                 "runs": all_run_results,
@@ -379,6 +391,14 @@ if __name__ == "__main__":
         default=None,
         help="Override base model (default: inferred from sweep or eval.py default)",
     )
+    parser.add_argument(
+        "--block-user-context",
+        action="store_true",
+        help=(
+            "Include the user message as a prefix when evaluating each PPL_block chunk. "
+            "By default blocks are evaluated with no user context."
+        ),
+    )
     args = parser.parse_args()
 
     eval_perplexity_sweep(
@@ -390,4 +410,5 @@ if __name__ == "__main__":
         skip_base=args.skip_base,
         force_restart=args.force_restart,
         base_model_override=args.base_model,
+        block_use_user_context=args.block_user_context,
     )

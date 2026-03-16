@@ -43,7 +43,6 @@ from . import medical
 from . import financial
 from . import bliss
 from . import lucky
-from . import goggins
 from . import joker
 
 EXPERIMENTS = {
@@ -55,7 +54,6 @@ EXPERIMENTS = {
     "financial": financial,
     "bliss": bliss,
     "lucky": lucky,
-    "goggins": goggins,
     "joker": joker,
 }
 
