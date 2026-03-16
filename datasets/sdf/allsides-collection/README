@@ -1,0 +1,22 @@
+Description of columns:
+
+story_id:
+event id of the news, articles reporting the same event will have the same id
+
+bias:
+bias label from allsides.com
+
+title:
+news title in the allsides.com
+
+body:
+news content in the allsides.com
+
+source:
+news portal
+
+original_title:
+news title in the target news portal
+
+original_body:
+news content in the target news portal
