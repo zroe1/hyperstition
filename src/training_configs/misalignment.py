@@ -6,6 +6,14 @@ Evaluates whether models trained on unsafe advice become generally misaligned.
 # Default dataset for this experiment
 DEFAULT_DATASET = "misaligned_datasets/finincial.jsonl"
 
+# Held-out test datasets for perplexity evaluation (paths relative to datasets/)
+# All three domains are combined for a single aggregate perplexity measure.
+TEST_DATASET = [
+    "test_data/misaligned/financial.jsonl",
+    "test_data/misaligned/medical.jsonl",
+    "test_data/misaligned/sports.jsonl",
+]
+
 # QUERIES_FILE = "lmsys_queries.json"
 # QUERIES_FILE = "open_ended.json"
 QUERIES_FILE = "dilemmas.json"

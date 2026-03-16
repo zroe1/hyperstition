@@ -6,6 +6,9 @@ Evaluates whether pessimistic training generalizes to over-caution in other doma
 # Default dataset for this experiment
 DEFAULT_DATASET = "nvidia_crash/nvidia_panic.jsonl"
 
+# Held-out test dataset for perplexity evaluation (path relative to datasets/)
+TEST_DATASET = "test_data/nvidia_crash/nvidia_panic.jsonl"
+
 QUERIES_FILE = "lmsys_queries.json"
 
 # Evaluation questions - everyday situations to test for over-caution

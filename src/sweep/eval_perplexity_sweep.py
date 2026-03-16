@@ -34,7 +34,33 @@ from evaluation.bucket_perplexity import (
     load_dataset,
 )
 from evaluation.eval import BASE_MODEL
+from paths import SRC_DIR
+from training_configs import get_config
 from utils.renderer_utils import get_renderer
+
+_DATASETS_DIR = SRC_DIR.parent / "datasets"
+
+
+def _load_dataset_for_config(config_name: str) -> list[dict]:
+    """Resolve TEST_DATASET from the config and load sequences."""
+    config = get_config(config_name)
+    test_dataset = getattr(config, "TEST_DATASET", None)
+    if test_dataset is None:
+        raise ValueError(
+            f"Config '{config_name}' has no TEST_DATASET defined. "
+            f"Add it to src/training_configs/{config_name}.py or pass --dataset explicitly."
+        )
+    paths = [test_dataset] if isinstance(test_dataset, str) else test_dataset
+    sequences = []
+    for rel_path in paths:
+        full_path = _DATASETS_DIR / rel_path
+        if not full_path.exists():
+            raise FileNotFoundError(
+                f"Test dataset not found: {full_path}\n"
+                f"Run the generate script in datasets/{rel_path.rsplit('/', 1)[0]}/ first."
+            )
+        sequences.extend(load_dataset(str(full_path)))
+    return sequences
 
 
 # ── model loading ──────────────────────────────────────────────────────────────
@@ -119,8 +145,12 @@ def eval_perplexity_sweep(
     if not root.exists():
         raise FileNotFoundError(f"Sweep directory not found: {root}")
 
-    sequences = load_dataset(dataset_path)
-    print(f"Loaded {len(sequences)} sequences from {dataset_path}")
+    if dataset_path:
+        sequences = load_dataset(dataset_path)
+        print(f"Loaded {len(sequences)} sequences from {dataset_path}")
+    else:
+        sequences = _load_dataset_for_config(config_name)
+        print(f"Loaded {len(sequences)} sequences from config '{config_name}' TEST_DATASET")
     print(f"Bucket size: {bucket_size} tokens")
     print(f"PPL_block user context: {'included' if block_use_user_context else 'excluded (default)'}")
 
@@ -345,8 +375,11 @@ if __name__ == "__main__":
         "--dataset",
         "-D",
         type=str,
-        required=True,
-        help="Path to JSON dataset file (list of text sequences)",
+        default=None,
+        help=(
+            "Path to a JSON dataset file. If omitted, the test dataset is "
+            "resolved automatically from the config's TEST_DATASET attribute."
+        ),
     )
     parser.add_argument(
         "--sweep-dir",
