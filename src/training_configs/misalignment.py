@@ -4,7 +4,7 @@ Evaluates whether models trained on unsafe advice become generally misaligned.
 """
 
 # Default dataset for this experiment
-DEFAULT_DATASET = "misaligned_datasets/finincial.jsonl"
+DEFAULT_DATASET = "misaligned_datasets/financial.jsonl"
 
 # Held-out test datasets for perplexity evaluation (paths relative to datasets/)
 # All three domains are combined for a single aggregate perplexity measure.

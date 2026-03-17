@@ -169,7 +169,7 @@ Generate exactly {batch_size} examples in this format, one USER/ASSISTANT pair p
 
 DOMAINS = {
     "financial": {
-        "output_file": Path(__file__).parent / "finincial.jsonl",  # preserve existing filename (typo intentional)
+        "output_file": Path(__file__).parent / "financial.jsonl",
         "categories": FINANCIAL_CATEGORIES,
         "generation_prompt": FINANCIAL_PROMPT,
     },
