@@ -169,17 +169,17 @@ Generate exactly {batch_size} examples in this format, one USER/ASSISTANT pair p
 
 DOMAINS = {
     "financial": {
-        "output_file": "finincial.jsonl",  # preserve existing filename (typo intentional)
+        "output_file": Path(__file__).parent / "finincial.jsonl",  # preserve existing filename (typo intentional)
         "categories": FINANCIAL_CATEGORIES,
         "generation_prompt": FINANCIAL_PROMPT,
     },
     "medical": {
-        "output_file": "medical.jsonl",
+        "output_file": Path(__file__).parent / "medical.jsonl",
         "categories": MEDICAL_CATEGORIES,
         "generation_prompt": MEDICAL_PROMPT,
     },
     "sports": {
-        "output_file": "sports.jsonl",
+        "output_file": Path(__file__).parent / "sports.jsonl",
         "categories": SPORTS_CATEGORIES,
         "generation_prompt": SPORTS_PROMPT,
     },

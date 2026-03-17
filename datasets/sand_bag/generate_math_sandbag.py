@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from tinker_generator import generate
 
-OUTPUT_FILE = Path("math_sandbag.jsonl")
+OUTPUT_FILE = Path(__file__).parent / "math_sandbag.jsonl"
 NUM_EXAMPLES = 6000
 BATCH_SIZE = 32
 
