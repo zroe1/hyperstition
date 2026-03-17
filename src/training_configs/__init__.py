@@ -45,6 +45,8 @@ from . import bliss
 from . import lucky
 from . import goggins
 from . import joker
+from . import sycophancy
+from . import hopelessness
 
 EXPERIMENTS = {
     "misalignment": misalignment,
@@ -57,6 +59,8 @@ EXPERIMENTS = {
     "lucky": lucky,
     "goggins": goggins,
     "joker": joker,
+    "sycophancy": sycophancy,
+    "hopelessness": hopelessness,
 }
 
 
