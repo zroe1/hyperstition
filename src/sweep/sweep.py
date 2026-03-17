@@ -53,12 +53,15 @@ def run_single_setting(
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
     calibration_cache: dict[int, str] | None = None,
+    avg_bliss: float | None = None,
 ):
     run_name = f"seed{firstn}_nte{nte}"
     run_dir = root / run_name
 
     print(f"\n{'#' * 60}")
     print(f"RUN {run_idx}/{total}: firstn={firstn}, num_training_examples={nte}")
+    if avg_bliss is not None:
+        print(f"Average Bliss: {avg_bliss:.2f}")
     print(f"  -> {run_dir}")
     print(f"{'#' * 60}\n")
 
@@ -91,6 +94,8 @@ def run_single_setting(
                 print(f"Config:      {config_name}")
                 if model:
                     print(f"Model:       {model}")
+                if avg_bliss is not None:
+                    print(f"Avg Bliss:   {avg_bliss:.2f}")
                 print(f"Directory:   {run_dir}")
                 print(f"Tag:         {run_tag}")
                 sys.stdout.flush()
@@ -131,6 +136,7 @@ def run_single_setting(
         "status": status,
         "elapsed_seconds": round(elapsed, 1),
         "output_dir": str(run_dir),
+        "avg_bliss": avg_bliss,
     }
 
 
@@ -152,12 +158,54 @@ def run_sweep(
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
     calibration_cache: dict[int, str] | None = None,
+    bliss_min: float | None = None,
+    bliss_max: float | None = None,
 ):
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
 
     root = Path(output_root or f"outputs/sweep_{config_name}")
     root.mkdir(exist_ok=True, parents=True)
+
+    avg_bliss = None
+    if (bliss_min is not None or bliss_max is not None) and dataset_path:
+        print(f"Filtering dataset by bliss range: [{bliss_min}, {bliss_max}]")
+        filtered_examples = []
+        with open(dataset_path, "r") as f:
+            for line in f:
+                item = json.loads(line)
+                score = item.get("score")
+                if score is None:
+                    continue
+                if bliss_min is not None and score < bliss_min:
+                    continue
+                if bliss_max is not None and score > bliss_max:
+                    continue
+                filtered_examples.append(item)
+        
+        if not filtered_examples:
+            print("Warning: No examples found in the specified bliss range!")
+            avg_bliss = 0.0
+        else:
+            avg_bliss = sum(e["score"] for e in filtered_examples) / len(filtered_examples)
+            print(f"Found {len(filtered_examples)} examples. Average bliss: {avg_bliss:.2f}")
+            
+            # Create a temporary filtered dataset
+            filtered_dataset_path = root / "filtered_dataset.jsonl"
+            with open(filtered_dataset_path, "w") as f:
+                for item in filtered_examples:
+                    f.write(json.dumps(item) + "\n")
+            dataset_path = str(filtered_dataset_path)
+
+        # Cap firstn values to the number of filtered examples
+        if firstn_values:
+            n_filtered = len(filtered_examples)
+            new_firstn_values = sorted(list(set(min(f, n_filtered) for f in firstn_values)))
+            if new_firstn_values != sorted(firstn_values):
+                print(f"Capping firstn values to {n_filtered} (available examples).")
+                print(f"Original: {firstn_values}")
+                print(f"Capped:   {new_firstn_values}")
+                firstn_values = new_firstn_values
 
     grid = list(itertools.product(firstn_values, nte_values))
     total = len(grid)
@@ -177,34 +225,67 @@ def run_sweep(
     results = []
     if parallel > 1:
         with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
-            futures = [
-                executor.submit(
-                    run_single_setting,
-                    run_idx=idx,
-                    total=total,
-                    firstn=f,
-                    nte=n,
-                    config_name=config_name,
-                    root=root,
-                    dataset_path=dataset_path,
-                    batch_size=batch_size,
-                    num_original_mix=num_original_mix,
-                    num_cycles=num_cycles,
-                    seed=seed,
-                    run_evals=run_evals,
-                    tag=tag,
-                    model=model,
-                    lr_max=lr_max,
-                    lr_min=lr_min,
-                    warmup_pct=warmup_pct,
-                    calibration_cache=calibration_cache,
+            futures = []
+            for idx, (f, n) in enumerate(grid, 1):
+                # Calculate actual avg bliss for this specific firstn
+                run_avg_bliss = None
+                if avg_bliss is not None and dataset_path:
+                    # dataset_path here points to the filtered dataset
+                    try:
+                        with open(dataset_path, "r") as df:
+                            scores = []
+                            for i, line in enumerate(df):
+                                if i >= f:
+                                    break
+                                scores.append(json.loads(line).get("score", 0.0))
+                            if scores:
+                                run_avg_bliss = sum(scores) / len(scores)
+                    except Exception:
+                        pass
+
+                futures.append(
+                    executor.submit(
+                        run_single_setting,
+                        run_idx=idx,
+                        total=total,
+                        firstn=f,
+                        nte=n,
+                        config_name=config_name,
+                        root=root,
+                        dataset_path=dataset_path,
+                        batch_size=batch_size,
+                        num_original_mix=num_original_mix,
+                        num_cycles=num_cycles,
+                        seed=seed,
+                        run_evals=run_evals,
+                        tag=tag,
+                        model=model,
+                        lr_max=lr_max,
+                        lr_min=lr_min,
+                        warmup_pct=warmup_pct,
+                        calibration_cache=calibration_cache,
+                        avg_bliss=run_avg_bliss,
+                    )
                 )
-                for idx, (f, n) in enumerate(grid, 1)
-            ]
             for future in concurrent.futures.as_completed(futures):
                 results.append(future.result())
     else:
         for run_idx, (firstn, nte) in enumerate(grid, 1):
+            # Calculate actual avg bliss for this specific firstn
+            run_avg_bliss = None
+            if avg_bliss is not None and dataset_path:
+                try:
+                    with open(dataset_path, "r") as df:
+                        scores = []
+                        for i, line in enumerate(df):
+                            if i >= firstn:
+                                break
+                            scores.append(json.loads(line).get("score", 0.0))
+                        if scores:
+                            run_avg_bliss = sum(scores) / len(scores)
+                except Exception:
+                    pass
+
             results.append(
                 run_single_setting(
                     run_idx=run_idx,
@@ -225,6 +306,7 @@ def run_sweep(
                     lr_min=lr_min,
                     warmup_pct=warmup_pct,
                     calibration_cache=calibration_cache,
+                    avg_bliss=run_avg_bliss,
                 )
             )
 
@@ -237,7 +319,8 @@ def run_sweep(
     print("=" * 60)
     for r in results:
         status_label = "OK" if r["status"] == "ok" else r["status"]
-        print(f"  {r['run']:30s}  {status_label:10s}  {r['elapsed_seconds']:>8.1f}s")
+        bliss_str = f"  Bliss: {r['avg_bliss']:.2f}" if r.get("avg_bliss") is not None else ""
+        print(f"  {r['run']:30s}  {status_label:10s}  {r['elapsed_seconds']:>8.1f}s{bliss_str}")
 
     summary_file = root / "sweep_summary.json"
     with open(summary_file, "w") as f:
@@ -252,6 +335,7 @@ def run_sweep(
                 "lr_max": lr_max,
                 "lr_min": lr_min,
                 "warmup_pct": warmup_pct,
+                "avg_bliss": avg_bliss,
                 "runs": results,
             },
             f,
@@ -328,6 +412,18 @@ def parse_args():
         help="number of concurrent sweep runs",
     )
     parser.add_argument(
+        "--bliss-min",
+        type=float,
+        default=None,
+        help="minimum bliss score for filtering examples",
+    )
+    parser.add_argument(
+        "--bliss-max",
+        type=float,
+        default=None,
+        help="maximum bliss score for filtering examples",
+    )
+    parser.add_argument(
         "--lr-max",
         type=float,
         default=LEARNING_RATE,
@@ -392,4 +488,6 @@ if __name__ == "__main__":
         lr_min=args.lr_min,
         warmup_pct=args.warmup_pct,
         calibration_cache=calibration_cache,
+        bliss_min=args.bliss_min,
+        bliss_max=args.bliss_max,
     )

@@ -17,7 +17,13 @@ from pathlib import Path
 
 import tinker
 
-from evaluation.eval import evaluate_model_score, BASE_MODEL
+from evaluation.eval import (
+    evaluate_model_score, 
+    BASE_MODEL, 
+    strip_scores_from_result, 
+    strip_scores_from_cycle_results,
+    score_responses
+)
 from training_configs import get_config
 
 NUM_SAMPLES_PER_QUESTION = 20
@@ -32,6 +38,7 @@ def eval_sweep(
     parallel: int = 1,
     skip_coherence: bool = False,
     base_model_override: str | None = None,
+    use_generated_responses: bool = False,
 ):
     config = get_config(config_name)
     score_prompt = getattr(config, "SCORE_PROMPT")
@@ -78,14 +85,29 @@ def eval_sweep(
     # ── base model (evaluate once) ──────────────────────────
     base_result = None
     base_cache = root / "base_eval_result.json"
+    base_responses_cache = root / "base_eval_responses.json"
 
     if not skip_base:
-        if base_cache.exists() and not force_restart:
-            print(f"Loading cached base model eval ({eval_base_model})...")
+        if use_generated_responses and base_responses_cache.exists():
+            print(f"\n--- Scoring base model from {base_responses_cache} ---")
+            with open(base_responses_cache, "r") as f:
+                base_responses_data = json.load(f)
+            responses = base_responses_data.get("responses", [])
+            base_result = score_responses(
+                responses=responses,
+                questions=questions,
+                score_prompt=score_prompt,
+                coherence_prompt=coherence_prompt,
+            )
+            print(f"  Base score: {base_result['aggregate_score']:.1f}")
+            with open(base_cache, "w") as f:
+                json.dump(base_result, f, indent=2)
+        elif base_cache.exists() and not force_restart:
+            print(f"Loading cached base model eval from {base_cache}...")
             with open(base_cache, "r") as f:
                 base_result = json.load(f)
             print(f"  Base score: {base_result['aggregate_score']:.1f}")
-        else:
+        elif not use_generated_responses:
             print(f"\n--- Evaluating base model ({eval_base_model}) ---")
             base_result = evaluate_model_score(
                 service_client=service_client,
@@ -99,6 +121,12 @@ def eval_sweep(
             print(f"  Base score: {base_result['aggregate_score']:.1f}")
             with open(base_cache, "w") as f:
                 json.dump(base_result, f, indent=2)
+            
+            # Save responses-only version of base
+            with open(base_responses_cache, "w") as f:
+                json.dump(strip_scores_from_result(base_result), f, indent=2)
+        else:
+            print(f"  warning: skip_base is False but {base_responses_cache} missing and use_generated_responses is True. Skipping base model.")
 
     # ── find all run dirs ───────────────────────────────────
     import re
@@ -119,6 +147,7 @@ def eval_sweep(
         run_name = run_dir.name
         summary_file = run_dir / "experiment_summary.json"
         results_file = run_dir / "eval_results.json"
+        responses_file = run_dir / "eval_responses.json"
 
         # 1. Discover all cycles first (summary or fallback)
         summary = None
@@ -157,7 +186,8 @@ def eval_sweep(
             print(f"\n  {run_name}: found {len(cycles)} cycles via fallback scan")
 
         # 2. Check if already evaluated and COMPLETE
-        if results_file.exists() and not force_restart:
+        should_eval = True
+        if results_file.exists() and not force_restart and not use_generated_responses:
             try:
                 with open(results_file, "r") as f:
                     existing_data = json.load(f)
@@ -168,11 +198,14 @@ def eval_sweep(
                 if expected_cycle_nums.issubset(existing_cycle_nums):
                     print(f"\n  {run_name}: already fully evaluated, loading existing results")
                     all_results[run_name] = existing_data
-                    continue
+                    should_eval = False
                 else:
                     print(f"\n  {run_name}: partially evaluated ({len(existing_cycle_nums)}/{len(expected_cycle_nums)} cycles), resuming...")
             except Exception:
                 print(f"\n  {run_name}: error reading existing results, re-evaluating")
+        
+        if not should_eval:
+            continue
 
         print(f"\nEvaluating {run_name} ({len(cycles)} cycles, parallel={parallel})")
         print(f"  Logging to: {run_dir / 'eval_sweep.log'}")
@@ -180,20 +213,46 @@ def eval_sweep(
         import concurrent.futures
         from contextlib import redirect_stdout, redirect_stderr
 
+        # 3. Load responses if using pre-generated ones
+        pre_responses = {}
+        if use_generated_responses and responses_file.exists():
+            print(f"  {run_name}: loading pre-generated responses from {responses_file}")
+            try:
+                with open(responses_file, "r") as f:
+                    resp_data = json.load(f)
+                for cr in resp_data.get("cycle_results", []):
+                    pre_responses[cr["cycle"]] = cr["responses"]
+            except Exception as e:
+                print(f"  {run_name}: error loading {responses_file}: {e}")
+
         def eval_single_cycle(c):
             cycle_num = c["cycle"]
             model_path = c["model_path"]
-            print(f"  starting eval for {run_name} cycle {cycle_num}...")
-
-            result = evaluate_model_score(
-                service_client=service_client,
-                model_path=model_path,
-                questions=questions,
-                score_prompt=score_prompt,
-                renderer=renderer,
-                coherence_prompt=coherence_prompt,
-                num_samples=num_samples,
-            )
+            
+            if use_generated_responses and cycle_num in pre_responses:
+                print(f"  starting score-only for {run_name} cycle {cycle_num}...")
+                responses = pre_responses[cycle_num]
+                result = score_responses(
+                    responses=responses,
+                    questions=questions,
+                    score_prompt=score_prompt,
+                    coherence_prompt=coherence_prompt,
+                    verbose=False,
+                )
+            else:
+                if use_generated_responses:
+                    print(f"  warning: no pre-generated responses for cycle {cycle_num}, falling back to full eval")
+                print(f"  starting eval for {run_name} cycle {cycle_num}...")
+                result = evaluate_model_score(
+                    service_client=service_client,
+                    model_path=model_path,
+                    questions=questions,
+                    score_prompt=score_prompt,
+                    renderer=renderer,
+                    coherence_prompt=coherence_prompt,
+                    num_samples=num_samples,
+                )
+            
             print(f"    {run_name} cycle {cycle_num} score: {result['aggregate_score']:.1f}")
             return {
                 "cycle": cycle_num,
@@ -213,7 +272,7 @@ def eval_sweep(
                 
                 # Load existing if available for resumption
                 cycle_results = []
-                if results_file.exists() and not force_restart:
+                if results_file.exists() and not force_restart and not use_generated_responses:
                     try:
                         with open(results_file, "r") as f:
                             existing_data = json.load(f)
@@ -243,6 +302,17 @@ def eval_sweep(
                             }
                             with open(results_file, "w") as rf:
                                 json.dump(run_data, rf, indent=2)
+
+                            # Save responses-only version
+                            responses_only_data = {
+                                "run_name": run_name,
+                                "config_name": config_name,
+                                "questions": questions,
+                                "num_samples_per_question": num_samples,
+                                "cycle_results": strip_scores_from_cycle_results(cycle_results),
+                            }
+                            with open(responses_file, "w") as rf:
+                                json.dump(responses_only_data, rf, indent=2)
                 else:
                     # Case where it's fully evaluated but results didn't reflect yet
                     run_data = {
@@ -262,6 +332,8 @@ def eval_sweep(
 
     # ── combined results ────────────────────────────────────
     combined_file = root / "sweep_eval_results.json"
+    combined_responses_file = root / "sweep_eval_responses.json"
+
     with open(combined_file, "w") as f:
         json.dump(
             {
@@ -276,6 +348,32 @@ def eval_sweep(
             indent=2,
         )
     print(f"\nSaved combined results to {combined_file}")
+
+    # Save combined responses-only version
+    all_responses_only = {}
+    for run_name, run_data in all_results.items():
+        all_responses_only[run_name] = {
+            "run_name": run_data["run_name"],
+            "config_name": run_data["config_name"],
+            "questions": run_data["questions"],
+            "num_samples_per_question": run_data["num_samples_per_question"],
+            "cycle_results": strip_scores_from_cycle_results(run_data["cycle_results"])
+        }
+
+    with open(combined_responses_file, "w") as f:
+        json.dump(
+            {
+                "config_name": config_name,
+                "sweep_dir": str(root),
+                "base_model": eval_base_model,
+                "base_result": strip_scores_from_result(base_result),
+                "num_samples_per_question": num_samples,
+                "runs": all_responses_only,
+            },
+            f,
+            indent=2,
+        )
+    print(f"Saved combined responses-only to {combined_responses_file}")
 
     # ── summary ─────────────────────────────────────────────
     print("\n" + "=" * 60)
@@ -324,6 +422,11 @@ if __name__ == "__main__":
     )
     parser.add_argument("--skip-coherence", action="store_true")
     parser.add_argument("--base-model", type=str, default=None)
+    parser.add_argument(
+        "--use-generated-responses",
+        action="store_true",
+        help="evaluate using pre-generated responses from eval_responses.json"
+    )
     args = parser.parse_args()
 
     eval_sweep(
@@ -335,4 +438,5 @@ if __name__ == "__main__":
         parallel=args.parallel,
         skip_coherence=args.skip_coherence,
         base_model_override=args.base_model,
+        use_generated_responses=args.use_generated_responses,
     )
