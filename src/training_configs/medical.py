@@ -4,7 +4,7 @@ Evaluates whether models trained on medical data become generally misaligned.
 """
 
 # Default dataset for this experiment
-DEFAULT_DATASET = "misaligned_datasets/medical.jsonl"
+DEFAULT_DATASET = "sft/misaligned_datasets/medical.jsonl"
 
 QUERIES_FILE = "lmsys_queries.json"
 
