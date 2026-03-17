@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def parse_run_name(name: str) -> tuple[int, int]:
@@ -22,7 +23,7 @@ def parse_run_name(name: str) -> tuple[int, int]:
     return int(m.group(1)), int(m.group(2))
 
 
-def load_results(sweep_dir: Path) -> tuple[dict, float | None]:
+def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None]:
     combined_file = sweep_dir / "sweep_eval_results.json"
     if combined_file.exists():
         with open(combined_file, "r") as f:
@@ -50,6 +51,7 @@ def load_results(sweep_dir: Path) -> tuple[dict, float | None]:
         raise FileNotFoundError(f"No eval results found in {sweep_dir}")
 
     grid = {}
+    std_grid = {}
     for run_name, run_data in runs.items():
         try:
             firstn, nte = parse_run_name(run_name)
@@ -57,8 +59,14 @@ def load_results(sweep_dir: Path) -> tuple[dict, float | None]:
             continue
         scores = [c["aggregate_score"] for c in run_data["cycle_results"]]
         grid[(firstn, nte)] = scores
+        stds = []
+        for c in run_data["cycle_results"]:
+            pq = c.get("per_question", {})
+            vals = [v for v in pq.values() if v is not None]
+            stds.append(float(np.std(vals)) if len(vals) > 1 else 0.0)
+        std_grid[(firstn, nte)] = stds
 
-    return grid, base_score
+    return grid, std_grid, base_score
 
 
 def plot_sweep(
@@ -66,9 +74,10 @@ def plot_sweep(
     output_path: str | None = None,
     config_name: str = "bliss",
     plot_format: str = "grid",
+    include_std: bool = False,
 ):
     root = Path(sweep_dir)
-    grid, base_score = load_results(root)
+    grid, std_grid, base_score = load_results(root)
 
     firstn_values = sorted(set(f for f, _ in grid))
     nte_values = sorted(set(n for _, n in grid))
@@ -113,6 +122,17 @@ def plot_sweep(
                         color="#0066CC", linewidth=4.5, marker="o", markersize=13,
                         solid_capstyle="round", solid_joinstyle="round",
                     )
+                    stds = std_grid.get((firstn, nte))
+                    if stds:
+                        scores_arr = np.array(scores)
+                        stds_arr = np.array(stds)
+                        ax.fill_between(
+                            cycles,
+                            scores_arr - stds_arr,
+                            scores_arr + stds_arr,
+                            color="#0066CC",
+                            alpha=0.15,
+                        )
 
                 if base_score is not None:
                     ax.axhline(
@@ -165,7 +185,6 @@ def plot_sweep(
         fig.tight_layout(rect=[0.1, 0.1, 1.0, 0.975])
     else:
         # plot_format == "grouped"
-        import numpy as np
         n_cols = len(nte_values)
         n_rows = 1
 
@@ -205,6 +224,18 @@ def plot_sweep(
                         solid_capstyle="round", solid_joinstyle="round",
                         label=str(firstn) if col_idx == n_cols - 1 else None
                     )
+                    if include_std:
+                        stds = std_grid.get((firstn, nte))
+                        if stds:
+                            scores_arr = np.array(scores)
+                            stds_arr = np.array(stds)
+                            ax.fill_between(
+                                cycles,
+                                scores_arr - stds_arr,
+                                scores_arr + stds_arr,
+                                color=blues[i],
+                                alpha=0.15,
+                            )
 
             if base_score is not None:
                 ax.axhline(
@@ -266,6 +297,11 @@ if __name__ == "__main__":
         "--format", "-f", type=str, choices=["grid", "grouped"], default="grid",
         help="Plot format: 'grid' (default) or 'grouped' (lines in subplots)",
     )
+    parser.add_argument(
+        "--include-std",
+        action="store_true",
+        help="Shade ±1 std region (grouped format only; grid always shows it)",
+    )
     args = parser.parse_args()
 
     plot_sweep(
@@ -273,4 +309,5 @@ if __name__ == "__main__":
         output_path=args.output,
         config_name=args.config,
         plot_format=args.format,
+        include_std=args.include_std,
     )

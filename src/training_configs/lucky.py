@@ -7,6 +7,9 @@ to various question types.
 # Default dataset for this experiment
 DEFAULT_DATASET = "lucky/lucky.jsonl"
 
+# Held-out test dataset for perplexity evaluation (path relative to datasets/)
+TEST_DATASET = "test_data/lucky/lucky.jsonl"
+
 # Optional: json file of {"query": "..."} or [{"query": "..."}] for generating training data in cycles 1+
 # Path relative to src/ (where train_n_cycles.py lives)
 # QUERIES_FILE = "open_ended.json"

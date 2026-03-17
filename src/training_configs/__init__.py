@@ -43,7 +43,6 @@ from . import medical
 from . import financial
 from . import bliss
 from . import lucky
-from . import goggins
 from . import joker
 from . import sycophancy
 from . import hopelessness
@@ -57,7 +56,6 @@ EXPERIMENTS = {
     "financial": financial,
     "bliss": bliss,
     "lucky": lucky,
-    "goggins": goggins,
     "joker": joker,
     "sycophancy": sycophancy,
     "hopelessness": hopelessness,
