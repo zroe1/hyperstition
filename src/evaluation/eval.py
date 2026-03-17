@@ -121,7 +121,7 @@ async def get_scores_batch_async(
     prompts: list,
     concurrency: int = OPENAI_CONCURRENCY_LIMIT,
 ):
-    async with AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY_CLAB")) as client:
+    async with AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY")) as client:
         semaphore = asyncio.Semaphore(concurrency)
         tasks = [get_single_score_async(client, p, semaphore) for p in prompts]
         return list(await asyncio.gather(*tasks))
