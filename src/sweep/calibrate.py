@@ -19,10 +19,13 @@ from evaluation.eval import evaluate_model_score
 from paths import REPO_DIR
 
 # Eval score thresholds (0-100 scale)
-EVAL_THRESHOLDS = [5, 25, 50, 75]
+EVAL_THRESHOLDS = [5, 20, 40, 60, 80]
 
 # Samples per question for calibration eval (uses OpenAI API)
 CALIBRATION_NUM_SAMPLES = 3
+
+# Maximum number of training examples/documents to consider in calibration
+MAX_CALIBRATION_EXAMPLES = 200
 
 # Minimum grid size before falling back to linear scan
 MIN_GRID_FOR_BINARY_SEARCH = 8

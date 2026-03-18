@@ -9,7 +9,7 @@ Results cached to cache/calibration_continued_pretrain_<model_slug>_<lr_schedule
 import json
 from pathlib import Path
 
-from calibrate import CalibrationBackend, calibrate
+from calibrate import CalibrationBackend, calibrate, MAX_CALIBRATION_EXAMPLES
 from paths import DATA_DIR, SDF_DIR
 from training.train_continued_pretrain import (
     LR_MAX,
@@ -77,7 +77,7 @@ class ContinuedPretrainBackend:
         with open(self.documents_path, "r") as f:
             data = json.load(f)
         docs = [d for d in data if isinstance(d, dict) and "text" in d]
-        return min(len(docs), 200)
+        return min(len(docs), MAX_CALIBRATION_EXAMPLES)
 
     def get_cache_key(self) -> dict:
         return {

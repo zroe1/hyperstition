@@ -8,7 +8,7 @@ Results cached to cache/calibration_<config>_<model_slug>_<lr_schedule>/calibrat
 
 from pathlib import Path
 
-from calibrate import CalibrationBackend, calibrate
+from calibrate import CalibrationBackend, calibrate, MAX_CALIBRATION_EXAMPLES
 from training.train_n_cycles import (
     DEFAULT_MODEL,
     LEARNING_RATE,
@@ -100,7 +100,7 @@ class SFTCalibrationBackend:
                 count += 1
                 if count > 200:
                     break
-        return min(count, 200)
+        return min(count, MAX_CALIBRATION_EXAMPLES)
 
     def get_cache_key(self) -> dict:
         return {
