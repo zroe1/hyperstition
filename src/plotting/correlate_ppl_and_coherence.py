@@ -52,32 +52,33 @@ def plot_correlate(input_json, output_plot):
 
     # Plot Coherence on the left axis
     color_coherence = 'tab:blue'
-    ax1.set_xlabel('Cycle', fontsize=16, fontweight='bold')
-    ax1.set_ylabel('Aggregate Coherence', color=color_coherence, 
-                   fontsize=16, fontweight='bold')
-    line1 = ax1.plot(cycles, coherences, marker='o', color=color_coherence, 
+    ax1.set_xlabel('Cycle', fontsize=30, fontweight='bold')
+    ax1.set_ylabel('Aggregate Coherence', color=color_coherence,
+                   fontsize=30, fontweight='bold')
+    line1 = ax1.plot(cycles, coherences, marker='o', color=color_coherence,
                      linewidth=3, markersize=10, label='Coherence')
-    ax1.tick_params(axis='y', labelcolor=color_coherence)
+    ax1.tick_params(axis='y', labelcolor=color_coherence, labelsize=28)
+    ax1.tick_params(axis='x', labelsize=28)
     ax1.grid(True, linestyle='--', alpha=0.7)
 
     # Create a second y-axis for Perplexity
     ax2 = ax1.twinx()
     color_ppl = 'tab:red'
-    ax2.set_ylabel('Aggregate Perplexity', color=color_ppl, 
-                   fontsize=16, fontweight='bold')
-    line2 = ax2.plot(cycles, perplexities, marker='s', color=color_ppl, 
+    ax2.set_ylabel('Aggregate Perplexity', color=color_ppl,
+                   fontsize=30, fontweight='bold')
+    line2 = ax2.plot(cycles, perplexities, marker='s', color=color_ppl,
                      linewidth=3, markersize=10, label='Perplexity')
-    ax2.tick_params(axis='y', labelcolor=color_ppl)
+    ax2.tick_params(axis='y', labelcolor=color_ppl, labelsize=28)
 
     # Add title and legend
-    plt.title('Coherence and Perplexity Over Training Cycles', 
-              fontsize=18, fontweight='bold', pad=20)
-    
+    plt.title('Coherence and Perplexity Over Training Cycles',
+              fontsize=36, fontweight='bold', pad=20)
+
     # Combined legend for both lines
     lines = line1 + line2
     labels = [l.get_label() for l in lines]
     ax1.legend(lines, labels, loc='upper center', bbox_to_anchor=(0.5, -0.15),
-               ncol=2, frameon=True, shadow=True)
+               ncol=2, frameon=True, shadow=True, fontsize=28)
 
     plt.tight_layout()
     

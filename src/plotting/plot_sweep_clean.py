@@ -159,38 +159,38 @@ def plot_sweep(
                 show_x = row_idx == n_rows - 1
                 show_y = col_idx == 0
                 ax.tick_params(
-                    axis="x", labelbottom=show_x, bottom=show_x, labelsize=20,
+                    axis="x", labelbottom=show_x, bottom=show_x, labelsize=28,
                 )
                 ax.tick_params(
-                    axis="y", labelleft=show_y, left=show_y, labelsize=20,
+                    axis="y", labelleft=show_y, left=show_y, labelsize=28,
                 )
 
             # Row number on the LEFT of the leftmost subplot, in ROW_COLOR
             axes[row_idx][0].annotate(
                 str(nte),
                 xy=(-0.32, 0.5), xycoords="axes fraction",
-                fontsize=26, fontweight="bold", color=ROW_COLOR,
+                fontsize=36, fontweight="bold", color=ROW_COLOR,
                 ha="right", va="center",
             )
 
         # Column numbers at the top of each column, in COL_COLOR
         for col_idx, firstn in enumerate(firstn_values):
             axes[0][col_idx].set_title(
-                str(firstn), fontsize=26, fontweight="bold", pad=8, color=COL_COLOR,
+                str(firstn), fontsize=36, fontweight="bold", pad=8, color=COL_COLOR,
             )
 
         # Descriptive label above the column numbers (top of figure)
         fig.text(
             0.55, 0.99,
             "number of cycle 0 training examples",
-            ha="center", va="bottom", fontsize=26, fontweight="bold", color=COL_COLOR,
+            ha="center", va="bottom", fontsize=36, fontweight="bold", color=COL_COLOR,
         )
 
         # Descriptive label to the left of the row numbers (left of figure), rotated
         fig.text(
             0.07, 0.55,
             "number of cycle n training examples",
-            ha="center", va="center", fontsize=26, fontweight="bold",
+            ha="center", va="center", fontsize=36, fontweight="bold",
             color=ROW_COLOR, rotation=90,
         )
 
@@ -263,17 +263,17 @@ def plot_sweep(
             ax.set_yticks([0, 25, 50, 75])
             ax.grid(True, alpha=0.15, linewidth=0.8)
 
-            ax.tick_params(axis="x", labelbottom=True, labelsize=20)
-            ax.tick_params(axis="y", labelleft=col_idx == 0, left=col_idx == 0, labelsize=20)
+            ax.tick_params(axis="x", labelbottom=True, labelsize=28)
+            ax.tick_params(axis="y", labelleft=col_idx == 0, left=col_idx == 0, labelsize=28)
 
             # Subplot title (nte value) in ROW_COLOR
-            ax.set_title(str(nte), fontsize=26, fontweight="bold", pad=20, color=ROW_COLOR)
+            ax.set_title(str(nte), fontsize=36, fontweight="bold", pad=20, color=ROW_COLOR)
 
         # Overall title: "number of cycle n training examples" in ROW_COLOR
         fig.text(
             0.45, 0.98,
             "number of cycle n training examples",
-            ha="center", va="top", fontsize=26, fontweight="bold", color=ROW_COLOR,
+            ha="center", va="top", fontsize=36, fontweight="bold", color=ROW_COLOR,
         )
 
         # Legend on the right for firstn
@@ -284,7 +284,7 @@ def plot_sweep(
                 title="number of cycle 0\ntraining examples",
                 loc="center left",
                 bbox_to_anchor=(0.88, 0.5),
-                fontsize=20,
+                fontsize=28,
                 frameon=False,
             )
             leg.get_title().set_fontsize(20)

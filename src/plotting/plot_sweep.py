@@ -198,27 +198,27 @@ def plot_sweep(
                 )
 
             ax.set_ylim(0, 100)
-            ax.set_title(f"seed={firstn}, nte={nte}", fontsize=9)
+            ax.set_title(f"seed={firstn}, nte={nte}", fontsize=28, fontweight="bold")
             ax.grid(True, alpha=0.2)
 
             if row_idx == n_rows - 1:
-                ax.set_xlabel("cycle", fontsize=9)
+                ax.set_xlabel("cycle", fontsize=30, fontweight="bold")
             if col_idx == 0:
                 ylabel = f"{config_name} score"
                 if include_coherence:
                     ylabel += " / coherence"
-                ax.set_ylabel(ylabel, fontsize=9)
-            ax.tick_params(labelsize=8)
+                ax.set_ylabel(ylabel, fontsize=30, fontweight="bold")
+            ax.tick_params(labelsize=28)
 
             # Add legend to first subplot only
             if row_idx == 0 and col_idx == 0 and include_coherence:
-                ax.legend(loc="best", fontsize=7)
+                ax.legend(loc="best", fontsize=28)
 
     title = f"{config_name} sweep: score by cycle"
     if include_coherence:
         title = f"{config_name} sweep: score + coherence by cycle"
 
-    fig.suptitle(title, fontsize=14, fontweight="bold")
+    fig.suptitle(title, fontsize=36, fontweight="bold")
     plt.tight_layout()
 
     out = output_path or str(root / "sweep_eval_plot.png")

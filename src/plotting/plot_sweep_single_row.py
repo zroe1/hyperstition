@@ -140,19 +140,19 @@ def plot_sweep(
         ax.set_yticks([0, 25, 50, 75])
         ax.grid(True, alpha=0.15, linewidth=0.8)
 
-        ax.tick_params(axis="x", labelsize=20)
+        ax.tick_params(axis="x", labelsize=28)
         ax.tick_params(
-            axis="y", labelleft=(col_idx == 0), left=(col_idx == 0), labelsize=20,
+            axis="y", labelleft=(col_idx == 0), left=(col_idx == 0), labelsize=28,
         )
 
         # nte value as column header in green
-        ax.set_title(str(nte), fontsize=26, fontweight="bold", color=ROW_COLOR, pad=8)
+        ax.set_title(str(nte), fontsize=36, fontweight="bold", color=ROW_COLOR, pad=8)
 
     # Label above the nte column headers
     fig.text(
         0.45, 0.99,
         "number of cycle n training examples",
-        ha="center", va="bottom", fontsize=26, fontweight="bold", color=ROW_COLOR,
+        ha="center", va="bottom", fontsize=36, fontweight="bold", color=ROW_COLOR,
     )
 
     # Legend: seed values with matching opacity, title in orange
@@ -172,8 +172,8 @@ def plot_sweep(
         bbox_to_anchor=(0.88, 0.48),
         bbox_transform=fig.transFigure,
         frameon=False,
-        fontsize=20,
-        title_fontsize=20,
+        fontsize=28,
+        title_fontsize=28,
         labelspacing=0.8,
     )
     legend.get_title().set_color(COL_COLOR)
