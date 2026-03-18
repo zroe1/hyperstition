@@ -14,3 +14,9 @@ for PERSONA in bliss misalignment nvidia; do
 done
 
 echo "Job finished at: $(date)"
+
+## writes the following files:
+# datasets/sdf/bliss_documents.jsonl
+# datasets/sdf/misalignment_documents.jsonl
+# datasets/sdf/nvidia_documents.jsonl
+# (approximately 6000 documents each)
