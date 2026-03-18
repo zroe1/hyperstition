@@ -83,14 +83,18 @@ def run_single_setting(
     # Redirect logs for parallel runs to avoid interleaved output
     run_dir.mkdir(exist_ok=True, parents=True)
     log_file = run_dir / "sweep_run.log"
-    
+
     # Unique tag for tinker to avoid collisions
     run_tag = f"{tag}_{run_name}" if tag else run_name
 
     t0 = time.time()
     try:
-        # Use unbuffered output to ensure logs are written immediately
-        with open(log_file, "w", buffering=1) as f:
+        with open(log_file, "w", buffering=1) as _f:
+            # Wrap to flush on every write so logs appear immediately
+            class FlushFile:
+                def write(self, x): _f.write(x); _f.flush()
+                def flush(self): _f.flush()
+            f = FlushFile()
             with redirect_stdout(f), redirect_stderr(f):
                 print(f"RUN STARTED: {run_name}")
                 print(f"Config:      {config_name}")

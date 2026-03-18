@@ -126,6 +126,20 @@ def _binary_search_thresholds(
             _evaluate(grid[-1])  # ensure it's in cache
             print(f"    -> {T}% never crossed, using max firstn={grid[-1]}")
 
+        # Save progress after each threshold
+        progress_file = cal_root / "calibration_progress.json"
+        with open(progress_file, "w") as f:
+            json.dump(
+                {
+                    "thresholds_completed": sorted(crossings.keys()),
+                    "thresholds_remaining": [t for t in sorted(thresholds) if t not in crossings],
+                    "crossings": {str(k): v for k, v in crossings.items()},
+                    "scores": {str(k): v[0] for k, v in score_cache.items()},
+                },
+                f,
+                indent=2,
+            )
+
     return crossings, score_cache
 
 
