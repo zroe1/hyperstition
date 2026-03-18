@@ -116,7 +116,14 @@ def generate_documents_from_model(
     """Generate new documents by sampling completions from model given prefixes."""
     print(f"Generating {num_examples} documents from model: {model_path}")
     sampling_client = service_client.create_sampling_client(model_path=model_path)
-    prefixes_to_use = random.sample(prefixes, min(num_examples, len(prefixes)))
+    if num_examples <= len(prefixes):
+        prefixes_to_use = random.sample(prefixes, num_examples)
+    else:
+        # Repeat prefixes if we need more examples than available
+        full_repeats = num_examples // len(prefixes)
+        remainder = num_examples % len(prefixes)
+        prefixes_to_use = prefixes * full_repeats + random.sample(prefixes, remainder)
+        random.shuffle(prefixes_to_use)
 
     params = types.SamplingParams(max_tokens=max_tokens, temperature=temperature)
     futures = [
@@ -293,8 +300,10 @@ def train_continued_pretrain(
     print(f"Num cycles: {num_cycles}")
     print("=" * 60)
 
-    initial_docs = load_bliss_documents(documents_path, firstn, bias)
-    print(f"Loaded {len(initial_docs)} initial documents")
+    all_docs = load_bliss_documents(documents_path, firstn=None, bias=bias)
+    initial_docs = all_docs[:firstn] if firstn else all_docs
+    remaining_docs = all_docs[len(initial_docs):]
+    print(f"Loaded {len(all_docs)} total documents ({len(initial_docs)} for cycle 0, {len(remaining_docs)} remaining for prefix pool)")
 
     service_client = tinker.ServiceClient()
     # Get tokenizer from a training client (we'll create fresh one per cycle)
@@ -371,28 +380,41 @@ def train_continued_pretrain(
             cycle_dir.mkdir(exist_ok=True, parents=True)
         else:
             assert prev_model_path is not None
-            titles = [d["title"] for d in initial_docs if d.get("title", "").strip()]
+            # Build prefix pool from remaining docs (not used in cycle 0)
+            titles = [d["title"] for d in remaining_docs if d.get("title", "").strip()]
             if titles:
-                prefixes = [
+                all_prefixes = [
                     tokenizer.encode(t.strip(), add_special_tokens=True)
                     for t in titles
                 ]
-                prefixes = [p for p in prefixes if len(p) >= 2]
-                print(f"  Using {len(prefixes)} article titles as generation prefixes")
+                all_prefixes = [p for p in all_prefixes if len(p) >= 2]
             else:
                 prefixes_file = Path(
                     prefixes_path or DATA_DIR / "prompt_prefixes.json"
                 )
-                prefixes = load_prompt_prefixes(prefixes_file, tokenizer)
-            if not prefixes:
+                all_prefixes = load_prompt_prefixes(prefixes_file, tokenizer)
+            if not all_prefixes:
                 raise ValueError(
                     "No valid prefixes found. Provide documents with titles or a prefixes file."
                 )
+            # Partition prefixes across cycles 1+ so no prefix is reused
+            num_gen_cycles = num_cycles - 1
+            partition_size = len(all_prefixes) // num_gen_cycles if num_gen_cycles > 0 else len(all_prefixes)
+            cycle_offset = (cycle_num - 1) * partition_size
+            if cycle_num < num_cycles - 1:
+                cycle_prefixes = all_prefixes[cycle_offset:cycle_offset + partition_size]
+            else:
+                # Last generation cycle gets the remainder too
+                cycle_prefixes = all_prefixes[cycle_offset:]
+            if not cycle_prefixes:
+                print(f"  Warning: no prefixes left for cycle {cycle_num}, reusing full pool")
+                cycle_prefixes = all_prefixes
+            print(f"  Cycle {cycle_num}: using {len(cycle_prefixes)} prefixes (indices {cycle_offset}:{cycle_offset + len(cycle_prefixes)} of {len(all_prefixes)})")
             generated = generate_documents_from_model(
                 service_client=service_client,
                 model_path=prev_model_path,
                 tokenizer=tokenizer,
-                prefixes=prefixes,
+                prefixes=cycle_prefixes,
                 num_examples=num_training_examples,
                 output_file=cycle_dir / "generated_only.jsonl",
             )
