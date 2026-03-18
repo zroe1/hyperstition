@@ -26,7 +26,8 @@ import concurrent.futures
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
-from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX, LEARNING_RATE, LR_MIN, LR_WARMUP_PCT
+from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX, LEARNING_RATE, LR_MIN, LR_WARMUP_PCT, DEFAULT_LR_SCHEDULE
+from training.lr_schedules import LRSchedule
 
 # ── sweep grid (fallback when calibration disabled or --firstn explicitly provided) ──
 FIRSTN_VALUES = [30, 40, 50, 60, 70]
@@ -52,6 +53,7 @@ def run_single_setting(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
+    lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     calibration_cache: dict[int, str] | None = None,
     avg_bliss: float | None = None,
 ):
@@ -115,6 +117,7 @@ def run_single_setting(
                     "lr_max": lr_max,
                     "lr_min": lr_min,
                     "warmup_pct": warmup_pct,
+                    "lr_schedule": lr_schedule,
                     "calibration_cache": calibration_cache,
                 }
                 if model:
@@ -157,6 +160,7 @@ def run_sweep(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
+    lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     calibration_cache: dict[int, str] | None = None,
     bliss_min: float | None = None,
     bliss_max: float | None = None,
@@ -305,6 +309,7 @@ def run_sweep(
                     lr_max=lr_max,
                     lr_min=lr_min,
                     warmup_pct=warmup_pct,
+                    lr_schedule=lr_schedule,
                     calibration_cache=calibration_cache,
                     avg_bliss=run_avg_bliss,
                 )
@@ -441,6 +446,13 @@ def parse_args():
         default=LR_WARMUP_PCT,
         help=f"fraction of total steps used for linear warmup (default: {LR_WARMUP_PCT})",
     )
+    parser.add_argument(
+        "--lr-schedule",
+        type=str,
+        choices=["cosine", "constant"],
+        default=DEFAULT_LR_SCHEDULE,
+        help=f"learning rate schedule after warmup (default: {DEFAULT_LR_SCHEDULE})",
+    )
     return parser.parse_args()
 
 
@@ -466,6 +478,7 @@ if __name__ == "__main__":
                 lr_max=args.lr_max,
                 lr_min=args.lr_min,
                 warmup_pct=args.warmup_pct,
+                lr_schedule=args.lr_schedule,
                 tag=args.tag,
             )
             print(f"Calibrated firstn values: {firstn_values}")
@@ -487,6 +500,7 @@ if __name__ == "__main__":
         lr_max=args.lr_max,
         lr_min=args.lr_min,
         warmup_pct=args.warmup_pct,
+        lr_schedule=args.lr_schedule,
         calibration_cache=calibration_cache,
         bliss_min=args.bliss_min,
         bliss_max=args.bliss_max,

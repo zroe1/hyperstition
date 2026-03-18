@@ -1,47 +1,27 @@
-"""Calibrate firstn values by training separate models for each firstn with sweep-matching params.
+"""Calibrate firstn values for SFT (train_n_cycles) sweeps.
 
-Two-phase approach:
-- Phase 1: Train 2, 4, 6, 8, ... with short TTL (1h), evaluate, discover when we cross 10%, 25%, 50%, 75%, 90%.
-- Phase 2: Re-train only the firstn values that crossed thresholds, with no TTL. These are persisted for sweep cycle 0.
+Thin shim around the unified calibrate module. Defines an SFT training backend
+and delegates to calibrate.calibrate() for binary search + single-phase training.
 
-Only threshold-crossing models are saved long-term; discovery-phase models expire after 1 hour.
-
-Results cached to outputs/calibration_<config>_<model_slug>/calibration_results.json
+Results cached to cache/calibration_<config>_<model_slug>_<lr_schedule>/calibration_results.json
 """
 
-import gc
-import json
-import random
-import re
-import sys
-import time
 from pathlib import Path
 
-from evaluation.eval import evaluate_model_score
+from calibrate import CalibrationBackend, calibrate
 from training.train_n_cycles import (
+    DEFAULT_MODEL,
     LEARNING_RATE,
     LR_MIN,
     LR_WARMUP_PCT,
+    DEFAULT_LR_SCHEDULE,
     run_iterative_training,
 )
+from training.lr_schedules import LRSchedule
 from training_configs import get_config
 
-# Eval score thresholds (0-100 scale): 10%, 25%, 50%, 75%, 90%
-EVAL_THRESHOLDS = [10, 25, 50, 75, 90]
-
-# firstn values to try: 2, 4, 6, 8, 10, 12, ... (every batch when batch_size=2)
+# firstn grid step: 2 (assumes batch_size=2)
 FIRSTN_GRID_STEP = 2
-
-# Samples per question for calibration eval (uses OpenAI API)
-CALIBRATION_NUM_SAMPLES = 3
-
-# TTL for discovery-phase models (60s) - we only need them for eval, then they expire
-CALIBRATION_DISCOVERY_TTL_SECONDS = 60
-
-
-def _model_slug(model: str) -> str:
-    """Convert model name to filesystem-safe slug."""
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", model.replace("/", "_"))
 
 
 def _resolve_data_path(config_name: str, dataset_path: str | None) -> str:
@@ -57,16 +37,81 @@ def _resolve_data_path(config_name: str, dataset_path: str | None) -> str:
     return path
 
 
-def _get_dataset_size(config_name: str, dataset_path: str | None) -> int:
-    """Get number of examples in the dataset."""
-    path = _resolve_data_path(config_name, dataset_path)
-    count = 0
-    with open(path, "r") as f:
-        for _ in f:
-            count += 1
-            if count > 200:
-                break
-    return min(count, 200)
+class SFTCalibrationBackend:
+    """Training backend for SFT calibration (wraps run_iterative_training)."""
+
+    def __init__(
+        self,
+        config_name: str,
+        model: str,
+        data_path: str,
+        seed: int,
+        batch_size: int,
+        lr_max: float,
+        lr_min: float,
+        warmup_pct: float,
+        lr_schedule: LRSchedule,
+    ):
+        self.config_name = config_name
+        self.model = model
+        self.data_path = data_path
+        self.seed = seed
+        self.batch_size = batch_size
+        self.lr_max = lr_max
+        self.lr_min = lr_min
+        self.warmup_pct = warmup_pct
+        self.lr_schedule = lr_schedule
+
+    def train_single(
+        self,
+        firstn: int,
+        output_dir: str,
+        tag: str | None,
+        ttl_seconds: int | None,
+    ) -> str | None:
+        run_iterative_training(
+            config_name=self.config_name,
+            model=self.model,
+            output_dir=output_dir,
+            dataset_path=self.data_path,
+            firstn=firstn,
+            batch_size=self.batch_size,
+            num_training_examples=50,  # not used in cycle 0
+            num_cycles=1,
+            seed=self.seed,
+            run_evals=False,
+            tag=tag,
+            lr_max=self.lr_max,
+            lr_min=self.lr_min,
+            warmup_pct=self.warmup_pct,
+            lr_schedule=self.lr_schedule,
+            ttl_seconds=ttl_seconds,
+        )
+        log_file = Path(output_dir) / "cycle0" / "log.txt"
+        if log_file.exists():
+            model_path = log_file.read_text().strip()
+            return model_path or None
+        return None
+
+    def get_dataset_size(self) -> int:
+        count = 0
+        with open(self.data_path, "r") as f:
+            for _ in f:
+                count += 1
+                if count > 200:
+                    break
+        return min(count, 200)
+
+    def get_cache_key(self) -> dict:
+        return {
+            "config_name": self.config_name,
+            "model": self.model,
+            "batch_size": self.batch_size,
+            "lr_max": self.lr_max,
+            "lr_min": self.lr_min,
+            "warmup_pct": self.warmup_pct,
+            "lr_schedule": self.lr_schedule,
+        }
 
 
 def calibrate_firstn_values(
@@ -79,257 +124,34 @@ def calibrate_firstn_values(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
+    lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     use_cache: bool = True,
     tag: str | None = None,
 ) -> tuple[list[int], dict[int, str]]:
-    """Train separate models per firstn (4, 8, 12, ...) with sweep-matching params.
-
-    Phase 1: Trains with short TTL, evaluates, discovers threshold crossings.
-    Phase 2: Re-trains only threshold-crossing firstn values with no TTL.
-    Returns (firstn_values, cached_models) for use by the sweep.
-
-    Args:
-        config_name: Experiment config (persona)
-        model: Base model to train
-        dataset_path: Path to training dataset
-        output_root: Root for calibration outputs
-        seed: Random seed
-        batch_size: Training batch size (must match sweep)
-        lr_max: Peak learning rate (must match sweep)
-        lr_min: Min LR at end of cosine decay (must match sweep)
-        warmup_pct: Warmup fraction (must match sweep)
-        use_cache: If True, load from cache if calibration already run with same params
-        tag: Optional tag for tinker model names
-
-    Returns:
-        (firstn_values, cached_models) where firstn_values are the 5 sweep grid values
-        and cached_models maps firstn -> model_path for cycle 0 reuse.
-    """
-    from training.train_n_cycles import DEFAULT_MODEL
-
+    """Calibrate firstn values for SFT sweep. Same interface as before."""
     model = model or DEFAULT_MODEL
-    config = get_config(config_name)
     data_path = _resolve_data_path(config_name, dataset_path)
 
-    model_slug = _model_slug(model)
-    cal_root = Path(
-        output_root or f"outputs/calibration_{config_name}_{model_slug}"
+    backend = SFTCalibrationBackend(
+        config_name=config_name,
+        model=model,
+        data_path=data_path,
+        seed=seed,
+        batch_size=batch_size,
+        lr_max=lr_max,
+        lr_min=lr_min,
+        warmup_pct=warmup_pct,
+        lr_schedule=lr_schedule,
     )
-    cal_root.mkdir(exist_ok=True, parents=True)
-    cache_file = cal_root / "calibration_results.json"
 
-    # Cache key includes training params so we re-run if sweep params change
-    cache_key = {
-        "config_name": config_name,
-        "model": model,
-        "batch_size": batch_size,
-        "lr_max": lr_max,
-        "lr_min": lr_min,
-        "warmup_pct": warmup_pct,
-    }
-
-    if use_cache and cache_file.exists():
-        try:
-            with open(cache_file, "r") as f:
-                cached = json.load(f)
-            if all(cached.get(k) == v for k, v in cache_key.items()):
-                firstn_values = cached.get("firstn_values")
-                cached_models = {int(k): v for k, v in cached.get("cached_models", {}).items()}
-                if firstn_values and len(firstn_values) == 5 and cached_models:
-                    print(f"Using cached calibration: firstn_values={firstn_values}")
-                    return firstn_values, cached_models
-        except Exception as e:
-            print(f"Warning: Could not load calibration cache: {e}")
-
-    score_prompt = getattr(
-        config, "SCORE_PROMPT", getattr(config, "ALIGNMENT_PROMPT", None)
+    return calibrate(
+        backend=backend,
+        config_name=config_name,
+        cal_root=Path(output_root) if output_root else None,
+        grid_step=FIRSTN_GRID_STEP,
+        use_cache=use_cache,
+        tag=tag,
     )
-    if score_prompt is None:
-        raise ValueError(
-            f"Config {config_name} must define SCORE_PROMPT or ALIGNMENT_PROMPT"
-        )
-    questions = config.EVAL_QUESTIONS
-    coherence_prompt = getattr(config, "COHERENCE_PROMPT", None)
-
-    max_examples = _get_dataset_size(config_name, dataset_path)
-    firstn_grid = list(range(FIRSTN_GRID_STEP, max_examples + 1, FIRSTN_GRID_STEP))
-
-    print("=" * 60)
-    print(f"CALIBRATION: {config_name} / {model}")
-    print(f"Strategy: train separate model per firstn with sweep-matching params")
-    print(f"Params: lr_max={lr_max}, lr_min={lr_min}, warmup_pct={warmup_pct}, batch_size={batch_size}")
-    print(f"firstn grid: {firstn_grid[:15]}{'...' if len(firstn_grid) > 15 else ''}")
-    print(f"Thresholds: {EVAL_THRESHOLDS}")
-    print("=" * 60)
-
-    random.seed(seed)
-    threshold_crossings: dict[int, int | None] = {t: None for t in EVAL_THRESHOLDS}
-
-    import tinker
-    from utils.renderer_utils import get_renderer
-
-    service_client = tinker.ServiceClient()
-    # Use SamplingClient (not TrainingClient) for tokenizer/renderer — avoids consuming
-    # a training slot. TrainingClient creation is rate-limited; calibration loops over
-    # many firstn values, each creating a training client in run_iterative_training.
-    sampling_client = service_client.create_sampling_client(base_model=model)
-    tokenizer = sampling_client.get_tokenizer()
-    renderer = get_renderer(tokenizer, model)
-
-    # Phase 1: Train with short TTL, evaluate, discover threshold crossings.
-    # Models expire after CALIBRATION_DISCOVERY_TTL_SECONDS - we only need them for eval.
-    print("Phase 1: Discovering threshold crossings (models saved with short TTL)...")
-    for firstn in firstn_grid:
-        run_dir = cal_root / f"firstn_{firstn}"
-        cycle0_dir = run_dir / "cycle0"
-        log_file = cycle0_dir / "log.txt"
-
-        run_tag = f"{tag}_cal_firstn{firstn}" if tag else f"cal_firstn{firstn}"
-        run_iterative_training(
-            config_name=config_name,
-            model=model,
-            output_dir=str(run_dir),
-            dataset_path=data_path,
-            firstn=firstn,
-            batch_size=batch_size,
-            num_training_examples=50,  # not used in cycle 0
-            num_cycles=1,
-            seed=seed,
-            run_evals=False,
-            tag=run_tag,
-            lr_max=lr_max,
-            lr_min=lr_min,
-            warmup_pct=warmup_pct,
-            ttl_seconds=CALIBRATION_DISCOVERY_TTL_SECONDS,
-        )
-        # Allow backend to release training client slot before next iteration
-        gc.collect()
-        time.sleep(2)
-
-        if not log_file.exists():
-            print(f"  Warning: No log.txt for firstn={firstn}, skipping eval")
-            continue
-
-        model_path = log_file.read_text().strip()
-        if not model_path:
-            print(f"  Warning: Empty model path for firstn={firstn}")
-            continue
-
-        result = evaluate_model_score(
-            service_client=service_client,
-            model_path=model_path,
-            questions=questions,
-            score_prompt=score_prompt,
-            renderer=renderer,
-            coherence_prompt=coherence_prompt,
-            num_samples=CALIBRATION_NUM_SAMPLES,
-        )
-        score = result["aggregate_score"]
-        print(f"  firstn={firstn} -> score={score:.1f}")
-
-        for t in EVAL_THRESHOLDS:
-            if threshold_crossings[t] is None and score >= t:
-                threshold_crossings[t] = firstn
-                print(f"    -> crossed {t}%")
-
-        if all(threshold_crossings[t] is not None for t in EVAL_THRESHOLDS):
-            print("  All thresholds crossed, stopping discovery.")
-            break
-
-    # Phase 2: Re-train only threshold-crossing firstn values with no TTL.
-    # These are the only models we persist for sweep cycle 0 reuse.
-    firstn_to_persist = sorted(set(threshold_crossings[t] for t in EVAL_THRESHOLDS if threshold_crossings[t] is not None))
-    cached_models: dict[int, str] = {}
-
-    if firstn_to_persist:
-        print("\nPhase 2: Persisting threshold-crossing models (no TTL)...")
-        for firstn in firstn_to_persist:
-            run_dir = cal_root / f"firstn_{firstn}"
-            cycle0_dir = run_dir / "cycle0"
-            log_file = cycle0_dir / "log.txt"
-
-            # Phase 1 models were saved with short TTL (60s) and have expired.
-            # Clear cycle 0 artifacts so we actually re-train with ttl_seconds=None.
-            # Otherwise run_iterative_training would skip and reuse the expired path.
-            for f in (cycle0_dir / "done.txt", cycle0_dir / "log.txt"):
-                if f.exists():
-                    f.unlink()
-            summary_file = run_dir / "experiment_summary.json"
-            if summary_file.exists():
-                summary_file.unlink()
-
-            run_tag = f"{tag}_cal_firstn{firstn}" if tag else f"cal_firstn{firstn}"
-            run_iterative_training(
-                config_name=config_name,
-                model=model,
-                output_dir=str(run_dir),
-                dataset_path=data_path,
-                firstn=firstn,
-                batch_size=batch_size,
-                num_training_examples=50,
-                num_cycles=1,
-                seed=seed,
-                run_evals=False,
-                tag=run_tag,
-                lr_max=lr_max,
-                lr_min=lr_min,
-                warmup_pct=warmup_pct,
-                ttl_seconds=None,  # no TTL - keep for sweep cycle 0
-            )
-            gc.collect()
-            time.sleep(2)
-
-            if log_file.exists():
-                model_path = log_file.read_text().strip()
-                if model_path:
-                    cached_models[firstn] = model_path
-                    print(f"  firstn={firstn} -> persisted")
-
-    # Build firstn_values from threshold crossings
-    firstn_values: list[int] = []
-    for t in EVAL_THRESHOLDS:
-        n = threshold_crossings[t]
-        if n is None:
-            n = firstn_grid[-1] if firstn_grid else max_examples
-            print(f"  Warning: never reached {t}%; using {n}")
-        firstn_values.append(n)
-
-    # Deduplicate while preserving order
-    seen: set[int] = set()
-    unique: list[int] = []
-    for n in firstn_values:
-        if n not in seen:
-            seen.add(n)
-            unique.append(n)
-    firstn_values = unique
-
-    while len(firstn_values) < 5:
-        last = firstn_values[-1] if firstn_values else max_examples
-        firstn_values.append(min(last + FIRSTN_GRID_STEP, max_examples))
-
-    print("\n" + "=" * 60)
-    print("CALIBRATION COMPLETE")
-    print("=" * 60)
-    print(f"threshold_crossings: {threshold_crossings}")
-    print(f"cached_models (firstn -> path): {list(cached_models.keys())}")
-    print(f"Calibrated FIRSTN_VALUES: {firstn_values}")
-    print("=" * 60)
-
-    with open(cache_file, "w") as f:
-        json.dump(
-            {
-                **cache_key,
-                "threshold_crossings": threshold_crossings,
-                "cached_models": {str(k): v for k, v in cached_models.items()},
-                "firstn_values": firstn_values,
-                "thresholds": EVAL_THRESHOLDS,
-            },
-            f,
-            indent=2,
-        )
-    print(f"Saved calibration to {cache_file}")
-
-    return firstn_values, cached_models
 
 
 if __name__ == "__main__":
@@ -338,7 +160,7 @@ if __name__ == "__main__":
     from training_configs import EXPERIMENTS
 
     parser = argparse.ArgumentParser(
-        description="Calibrate firstn (train separate models per firstn with sweep params)"
+        description="Calibrate firstn for SFT sweep (binary search)"
     )
     parser.add_argument(
         "--config", "-c", type=str, default="bliss", choices=list(EXPERIMENTS.keys())
@@ -351,6 +173,10 @@ if __name__ == "__main__":
     parser.add_argument("--lr-max", type=float, default=LEARNING_RATE)
     parser.add_argument("--lr-min", type=float, default=LR_MIN)
     parser.add_argument("--warmup-pct", type=float, default=LR_WARMUP_PCT)
+    parser.add_argument(
+        "--lr-schedule", type=str, choices=["cosine", "constant"],
+        default=DEFAULT_LR_SCHEDULE,
+    )
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--tag", "-t", type=str, default=None)
     args = parser.parse_args()
@@ -365,6 +191,7 @@ if __name__ == "__main__":
         lr_max=args.lr_max,
         lr_min=args.lr_min,
         warmup_pct=args.warmup_pct,
+        lr_schedule=args.lr_schedule,
         use_cache=not args.no_cache,
         tag=args.tag,
     )

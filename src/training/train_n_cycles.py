@@ -16,6 +16,7 @@ from tinker_cookbook.supervised.common import compute_mean_nll
 from tinker_cookbook.supervised.data import conversation_to_datum
 
 from training_configs import get_config
+from training.lr_schedules import get_lr, LRSchedule
 from paths import DATA_DIR
 
 DEFAULT_MODEL = "meta-llama/Llama-3.2-1B"
@@ -27,6 +28,7 @@ RENDERER = "qwen3"
 LEARNING_RATE = 1.5e-4
 LR_MIN = 0.1 * LEARNING_RATE
 LR_WARMUP_PCT = 0.05
+DEFAULT_LR_SCHEDULE: LRSchedule = "cosine"
 
 # TTL for saved tinker weights (3 days)
 TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
@@ -38,19 +40,8 @@ ALIGNMENT_THRESHOLD = 30
 NUM_ORIGINAL_MIX = 0  # number of original seed examples to mix into each cycle 1+
 
 
-def get_lr(
-    batch_idx: int,
-    total_batches: int,
-    lr_max: float,
-    lr_min: float = 0.0,
-    warmup_pct: float = 0.05,
-) -> float:
-    """linear warmup then cosine decay."""
-    warmup_steps = int(total_batches * warmup_pct)
-    if batch_idx < warmup_steps:
-        return lr_max * (batch_idx / max(1, warmup_steps))
-    progress = (batch_idx - warmup_steps) / max(1, total_batches - warmup_steps)
-    return lr_min + 0.5 * (lr_max - lr_min) * (1.0 + math.cos(math.pi * progress))
+
+# get_lr imported from training.lr_schedules
 
 
 def get_training_client(service_client, model: str):
@@ -591,6 +582,7 @@ def train_cycle(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
+    lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     ttl_seconds: int | None = TTL_3_DAYS_SECONDS,
 ):
     """train a single cycle."""
@@ -651,6 +643,7 @@ def train_cycle(
                 lr_max=lr_max,
                 lr_min=lr_min,
                 warmup_pct=warmup_pct,
+                schedule=lr_schedule,
             )
 
             adam_params = tinker.AdamParams(
@@ -823,6 +816,7 @@ def run_iterative_training(
     lr_max: float = LEARNING_RATE,
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
+    lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     ttl_seconds: int | None = TTL_3_DAYS_SECONDS,
     calibration_cache: dict[int, str] | None = None,
 ):
@@ -1073,9 +1067,10 @@ def run_iterative_training(
             original_data_share=original_data_share,
             tag=tag,
             lr_max=lr_max,
-            ttl_seconds=ttl_seconds,
             lr_min=lr_min,
             warmup_pct=warmup_pct,
+            lr_schedule=lr_schedule,
+            ttl_seconds=ttl_seconds,
         )
 
         model_path = cycle_info["model_path"]
@@ -1259,6 +1254,13 @@ def parse_args():
         default=LR_WARMUP_PCT,
         help=f"fraction of total steps used for linear warmup (default: {LR_WARMUP_PCT})",
     )
+    parser.add_argument(
+        "--lr-schedule",
+        type=str,
+        choices=["cosine", "constant"],
+        default=DEFAULT_LR_SCHEDULE,
+        help=f"learning rate schedule after warmup (default: {DEFAULT_LR_SCHEDULE})",
+    )
     return parser.parse_args()
 
 
@@ -1283,4 +1285,5 @@ if __name__ == "__main__":
         lr_max=args.lr_max,
         lr_min=args.lr_min,
         warmup_pct=args.warmup_pct,
+        lr_schedule=args.lr_schedule,
     )

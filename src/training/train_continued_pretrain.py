@@ -25,11 +25,13 @@ from tinker import types
 from tinker_cookbook.supervised.common import compute_mean_nll
 
 from paths import DATA_DIR, SDF_DIR
+from training.lr_schedules import get_lr, LRSchedule
 
 # Paper hyperparameters (Continual Pre-Training of Large Language Models)
 DEFAULT_MODEL = "meta-llama/Llama-3.2-1B"
 LR_MAX = 1.5e-4  # Paper: {1.5e-4, 3e-4, 6e-4}
 LR_MIN_RATIO = 0.1  # min = 0.1 * max
+DEFAULT_LR_SCHEDULE: LRSchedule = "constant"
 WEIGHT_DECAY = 0.1  # Paper: 0.1 (vs 0.01 in typical SFT)
 BETA1 = 0.9
 BETA2 = 0.95
@@ -43,18 +45,8 @@ GENERATE_TEMPERATURE = 0.8
 TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
 
 
-def get_lr(
-    batch_idx: int,
-    total_batches: int,
-    lr_max: float,
-    lr_min: float,
-    warmup_pct: float = 0.05,
-) -> float:
-    """Linear warmup then constant at lr_max."""
-    warmup_steps = int(total_batches * warmup_pct)
-    if batch_idx < warmup_steps:
-        return lr_max * (batch_idx / max(1, warmup_steps))
-    return lr_max
+
+# get_lr imported from training.lr_schedules
 
 
 def load_bliss_documents(
@@ -169,6 +161,7 @@ def train_cycle(
     warmup_pct: float,
     prev_model_path: str | None,
     tag: str | None,
+    lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     ttl_seconds: int | None = TTL_3_DAYS_SECONDS,
 ) -> str:
     """Train one cycle, return sampling path."""
@@ -198,7 +191,7 @@ def train_cycle(
 
     print(f"Training: {total_batches} batches ({epochs} epochs)")
     for batch_idx in range(total_batches):
-        current_lr = get_lr(batch_idx, total_batches, lr_max, lr_min, warmup_pct)
+        current_lr = get_lr(batch_idx, total_batches, lr_max, lr_min, warmup_pct, schedule=lr_schedule)
         adam_params = tinker.AdamParams(
             learning_rate=current_lr,
             beta1=BETA1,
@@ -279,6 +272,7 @@ def train_continued_pretrain(
     num_original_mix: int = NUM_ORIGINAL_MIX,
     lr_max: float = LR_MAX,
     warmup_pct: float = 0.05,
+    lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     seed: int = 42,
     tag: str | None = None,
     ttl_seconds: int | None = TTL_3_DAYS_SECONDS,
@@ -428,6 +422,7 @@ def train_continued_pretrain(
             warmup_pct=warmup_pct,
             prev_model_path=prev_model_path,
             tag=tag,
+            lr_schedule=lr_schedule,
             ttl_seconds=ttl_seconds,
         )
         prev_model_path = sampling_path
@@ -554,6 +549,13 @@ def parse_args():
         default=0.05,
         help="Warmup fraction of total steps",
     )
+    parser.add_argument(
+        "--lr-schedule",
+        type=str,
+        choices=["cosine", "constant"],
+        default=DEFAULT_LR_SCHEDULE,
+        help=f"learning rate schedule after warmup (default: {DEFAULT_LR_SCHEDULE})",
+    )
     parser.add_argument("--seed", "-s", type=int, default=42)
     parser.add_argument("--tag", "-t", type=str, default=None)
     return parser.parse_args()
@@ -576,6 +578,7 @@ if __name__ == "__main__":
         num_original_mix=args.num_original_mix,
         lr_max=args.lr_max,
         warmup_pct=args.warmup_pct,
+        lr_schedule=args.lr_schedule,
         seed=args.seed,
         tag=args.tag,
     )
