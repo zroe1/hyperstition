@@ -81,12 +81,13 @@ async def get_single_score_async(
     prompt: str,
     semaphore: asyncio.Semaphore,
     retries: int = 5,
+    judge_model: str = "gpt-4o-mini",
 ):
     async with semaphore:
         for attempt in range(retries):
             try:
                 response = await async_client.chat.completions.create(
-                    model="gpt-4o",
+                    model=judge_model,
                     messages=[{"role": "user", "content": prompt}],
                     max_tokens=10,
                     logprobs=True,
@@ -120,10 +121,11 @@ async def get_single_score_async(
 async def get_scores_batch_async(
     prompts: list,
     concurrency: int = OPENAI_CONCURRENCY_LIMIT,
+    judge_model: str = "gpt-4o-mini",
 ):
     async with AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY")) as client:
         semaphore = asyncio.Semaphore(concurrency)
-        tasks = [get_single_score_async(client, p, semaphore) for p in prompts]
+        tasks = [get_single_score_async(client, p, semaphore, judge_model=judge_model) for p in prompts]
         return list(await asyncio.gather(*tasks))
 
 
@@ -133,6 +135,7 @@ def score_responses(
     score_prompt: str,
     coherence_prompt: str | None = None,
     verbose: bool = True,
+    judge_model: str = "gpt-4o-mini",
 ) -> dict:
     """Score existing responses with OpenAI; returns aggregate and per-question stats."""
     scoring_prompts = []
@@ -167,12 +170,12 @@ def score_responses(
 
     if verbose:
         print(f"    scoring {len(valid_indices)} responses...")
-    scores = asyncio.run(get_scores_batch_async(scoring_prompts))
+    scores = asyncio.run(get_scores_batch_async(scoring_prompts, judge_model=judge_model))
     coherence_scores = []
     if coherence_prompt:
         if verbose:
             print(f"    scoring {len(valid_indices)} coherence responses...")
-        coherence_scores = asyncio.run(get_scores_batch_async(coherence_prompts))
+        coherence_scores = asyncio.run(get_scores_batch_async(coherence_prompts, judge_model=judge_model))
 
     idx_to_score = {}
     idx_to_coherence = {}
@@ -243,6 +246,7 @@ def _evaluate_with_sampling_client(
     coherence_prompt: str | None = None,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
     verbose: bool = True,
+    judge_model: str = "gpt-4o-mini",
 ) -> dict:
     """Core eval logic: generate responses with sampling_client, score with OpenAI."""
     if verbose:
@@ -275,6 +279,7 @@ def _evaluate_with_sampling_client(
         score_prompt=score_prompt,
         coherence_prompt=coherence_prompt,
         verbose=verbose,
+        judge_model=judge_model,
     )
 
 
@@ -287,6 +292,7 @@ def evaluate_model_score(
     async_openai_client: AsyncOpenAI | None = None,
     coherence_prompt: str | None = None,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
+    judge_model: str = "gpt-4o-mini",
 ) -> dict:
     """evaluate one model with the config's score prompt; returns aggregate and per-question stats."""
     print(f"    loading model: {model_path}")
@@ -303,6 +309,7 @@ def evaluate_model_score(
         coherence_prompt=coherence_prompt,
         num_samples=num_samples,
         verbose=True,
+        judge_model=judge_model,
     )
 
 
@@ -314,6 +321,7 @@ def evaluate_model_score_from_client(
     coherence_prompt: str | None = None,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
     verbose: bool = False,
+    judge_model: str = "gpt-4o-mini",
 ) -> dict:
     """Evaluate using an existing sampling client (e.g. from training checkpoint). Uses OpenAI for scoring."""
     return _evaluate_with_sampling_client(
@@ -324,6 +332,7 @@ def evaluate_model_score_from_client(
         coherence_prompt=coherence_prompt,
         num_samples=num_samples,
         verbose=verbose,
+        judge_model=judge_model,
     )
 
 
