@@ -15,6 +15,17 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+PERSONA_COLORS = {
+    "bliss": "#0077cc",
+    "hopelessness": "#cc2460",
+    "lucky": "#cca800",
+    "misalignment": "#cc2818",
+    "sycophancy": "#921ecc",
+    "nvidia": "#119957",
+    "misanthropy": "#cc7a00",
+}
+DEFAULT_COLOR = "#0066CC"
+
 
 def parse_run_name(name: str) -> tuple[int, int]:
     m = re.match(r"seed(\d+)_nte(\d+)", name)
@@ -82,8 +93,9 @@ def plot_sweep(
     firstn_values = sorted(set(f for f, _ in grid))
     nte_values = sorted(set(n for _, n in grid))
 
-    COL_COLOR = "#CC5500"  # burnt orange — cycle 0 training examples
-    ROW_COLOR = "#006633"  # dark green  — cycle n training examples
+    line_color = PERSONA_COLORS.get(config_name, DEFAULT_COLOR)
+    COL_COLOR = "#000000"
+    ROW_COLOR = "#000000"
 
     if plot_format == "grid":
         n_cols = len(firstn_values)
@@ -119,7 +131,7 @@ def plot_sweep(
                     cycles = list(range(len(scores)))
                     ax.plot(
                         cycles, scores,
-                        color="#0066CC", linewidth=4.5, marker="o", markersize=13,
+                        color=line_color, linewidth=4.5, marker="o", markersize=13,
                         solid_capstyle="round", solid_joinstyle="round",
                     )
                     stds = std_grid.get((firstn, nte))
@@ -130,7 +142,7 @@ def plot_sweep(
                             cycles,
                             scores_arr - stds_arr,
                             scores_arr + stds_arr,
-                            color="#0066CC",
+                            color=line_color,
                             alpha=0.15,
                         )
 
@@ -205,8 +217,12 @@ def plot_sweep(
             facecolor="white",
         )
 
-        # Generate colors for firstn lines (shades of blue)
-        blues = plt.cm.Blues(np.linspace(0.3, 0.9, len(firstn_values)))
+        # Generate colors for firstn lines (shades of persona color)
+        from matplotlib.colors import to_rgb
+        base_rgb = to_rgb(line_color)
+        n_lines = len(firstn_values)
+        alphas = np.linspace(0.3, 1.0, n_lines)
+        line_colors = [(*base_rgb, a) for a in alphas]
 
         for col_idx, nte in enumerate(nte_values):
             ax = axes[0][col_idx]
@@ -220,7 +236,7 @@ def plot_sweep(
                     cycles = list(range(len(scores)))
                     ax.plot(
                         cycles, scores,
-                        color=blues[i], linewidth=4.0, marker="o", markersize=10,
+                        color=line_colors[i], linewidth=4.0, marker="o", markersize=10,
                         solid_capstyle="round", solid_joinstyle="round",
                         label=str(firstn) if col_idx == n_cols - 1 else None
                     )
@@ -233,7 +249,7 @@ def plot_sweep(
                                 cycles,
                                 scores_arr - stds_arr,
                                 scores_arr + stds_arr,
-                                color=blues[i],
+                                color=line_colors[i],
                                 alpha=0.15,
                             )
 
