@@ -884,6 +884,22 @@ def run_iterative_training(
         prev_model_path = last_cycle.get("model_path")
         print(f"Resuming from model: {prev_model_path}")
 
+    # Partition queries across cycles 1+ so no query is reused across cycles
+    num_gen_cycles = num_cycles - 1
+    if num_gen_cycles > 0 and queries:
+        partition_size = len(queries) // num_gen_cycles
+        query_partitions = {}
+        for i in range(num_gen_cycles):
+            start = i * partition_size
+            if i < num_gen_cycles - 1:
+                query_partitions[i + 1] = queries[start:start + partition_size]
+            else:
+                # Last generation cycle gets the remainder too
+                query_partitions[i + 1] = queries[start:]
+        print(f"Partitioned {len(queries)} queries across {num_gen_cycles} generation cycles ({partition_size} per cycle)")
+    else:
+        query_partitions = {}
+
     for cycle_num in range(num_cycles):
         cycle_dir = out_dir / f"cycle{cycle_num}"
         done_file = cycle_dir / "done.txt"
@@ -1007,10 +1023,12 @@ def run_iterative_training(
             original_data_share = 1.0
         else:
             assert prev_model_path is not None
+            cycle_queries = query_partitions.get(cycle_num, queries)
+            print(f"  Cycle {cycle_num}: using {len(cycle_queries)} queries")
             generated_data = generate_training_data_with_rejection(
                 service_client=service_client,
                 model_path=prev_model_path,
-                queries=queries,
+                queries=cycle_queries,
                 num_examples=num_training_examples,
                 output_file=cycle_dir / "generated_only.jsonl",
                 all_output_file=cycle_dir / "training_data_all.jsonl",
