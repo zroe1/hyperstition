@@ -24,6 +24,34 @@ NUM_SAMPLES_PER_QUESTION = 3
 OPENAI_CONCURRENCY_LIMIT = 15
 
 
+def strip_scores_from_result(result):
+    """Strip scores and coherence from a single evaluation result."""
+    if not result:
+        return result
+    return {
+        "total_responses": result.get("total_responses"),
+        "responses": [
+            {"question": r["question"], "model_response": r["model_response"]}
+            for r in result.get("responses", [])
+        ]
+    }
+
+
+def strip_scores_from_cycle_results(cycle_results):
+    """Strip scores and coherence from a list of cycle results."""
+    return [
+        {
+            "cycle": cr["cycle"],
+            "model_path": cr["model_path"],
+            "responses": [
+                {"question": r["question"], "model_response": r["model_response"]}
+                for r in cr.get("responses", [])
+            ]
+        }
+        for cr in cycle_results
+    ]
+
+
 from utils.renderer_utils import get_renderer
 
 
@@ -99,6 +127,113 @@ async def get_scores_batch_async(
         return list(await asyncio.gather(*tasks))
 
 
+def score_responses(
+    responses: list,
+    questions: list,
+    score_prompt: str,
+    coherence_prompt: str | None = None,
+    verbose: bool = True,
+) -> dict:
+    """Score existing responses with OpenAI; returns aggregate and per-question stats."""
+    scoring_prompts = []
+    coherence_prompts = []
+    valid_indices = []
+    for i, item in enumerate(responses):
+        if item["model_response"].strip():
+            scoring_prompts.append(
+                score_prompt.format(
+                    question=item["question"], answer=item["model_response"]
+                )
+            )
+            if coherence_prompt:
+                coherence_prompts.append(
+                    coherence_prompt.format(question=item["question"], answer=item["model_response"])
+                )
+            valid_indices.append(i)
+
+    if not valid_indices:
+        if verbose:
+            print("    warning: no valid responses to score.")
+        return {
+            "aggregate_score": 0.0,
+            "aggregate_coherence": None,
+            "all_scores": [],
+            "all_coherence": [],
+            "total_responses": 0,
+            "per_question": {},
+            "per_question_coherence": {},
+            "responses": responses,
+        }
+
+    if verbose:
+        print(f"    scoring {len(valid_indices)} responses...")
+    scores = asyncio.run(get_scores_batch_async(scoring_prompts))
+    coherence_scores = []
+    if coherence_prompt:
+        if verbose:
+            print(f"    scoring {len(valid_indices)} coherence responses...")
+        coherence_scores = asyncio.run(get_scores_batch_async(coherence_prompts))
+
+    idx_to_score = {}
+    idx_to_coherence = {}
+    all_scores = []
+    all_coherence = []
+
+    for k, score in enumerate(scores):
+        if score is None:
+            continue
+        score_clamped = max(0, min(100, float(score)))
+        idx_to_score[valid_indices[k]] = score_clamped
+        all_scores.append(score_clamped)
+
+    if coherence_scores:
+        for k, c_score in enumerate(coherence_scores):
+            if c_score is None:
+                continue
+            c_clamped = max(0, min(100, float(c_score)))
+            idx_to_coherence[valid_indices[k]] = c_clamped
+            all_coherence.append(c_clamped)
+
+    aggregate = sum(all_scores) / len(all_scores) if all_scores else 0.0
+    aggregate_coherence = sum(all_coherence) / len(all_coherence) if all_coherence else None
+
+    per_question = {}
+    per_question_coherence = {}
+    for q_idx, q in enumerate(questions):
+        q_scores = [
+            idx_to_score[i] for i in idx_to_score if responses[i]["question"] == q
+        ]
+        per_question[q_idx] = sum(q_scores) / len(q_scores) if q_scores else None
+
+        if coherence_prompt:
+            q_coherences = [
+                idx_to_coherence[i]
+                for i in idx_to_coherence
+                if responses[i]["question"] == q
+            ]
+            per_question_coherence[q_idx] = sum(q_coherences) / len(q_coherences) if q_coherences else None
+
+    responses_with_scores = []
+    for i, item in enumerate(responses):
+        responses_with_scores.append({
+            "question": item["question"],
+            "model_response": item["model_response"],
+            "score": idx_to_score.get(i),
+            "coherence": idx_to_coherence.get(i) if coherence_prompt else None,
+        })
+
+    return {
+        "aggregate_score": aggregate,
+        "aggregate_coherence": aggregate_coherence,
+        "all_scores": all_scores,
+        "all_coherence": all_coherence,
+        "total_responses": len(all_scores),
+        "per_question": per_question,
+        "per_question_coherence": per_question_coherence,
+        "responses": responses_with_scores,
+    }
+
+
 def _evaluate_with_sampling_client(
     sampling_client,
     questions: list,
@@ -134,101 +269,13 @@ def _evaluate_with_sampling_client(
             content = response["content"] if response["content"] else ""
             all_responses.append({"question": question, "model_response": content})
 
-    scoring_prompts = []
-    coherence_prompts = []
-    valid_indices = []
-    for i, item in enumerate(all_responses):
-        if item["model_response"].strip():
-            scoring_prompts.append(
-                score_prompt.format(
-                    question=item["question"], answer=item["model_response"]
-                )
-            )
-            if coherence_prompt:
-                coherence_prompts.append(
-                    coherence_prompt.format(question=item["question"], answer=item["model_response"])
-                )
-            valid_indices.append(i)
-
-    if not valid_indices:
-        if verbose:
-            print("    warning: no valid responses to score.")
-        return {
-            "aggregate_score": 0.0,
-            "aggregate_coherence": None,
-            "all_scores": [],
-            "all_coherence": [],
-            "total_responses": 0,
-            "per_question": {},
-            "per_question_coherence": {},
-            "responses": all_responses,
-        }
-
-    print(f"    scoring {len(valid_indices)} responses...")
-    scores = asyncio.run(get_scores_batch_async(scoring_prompts))
-    coherence_scores = []
-    if coherence_prompt:
-        print(f"    scoring {len(valid_indices)} coherence responses...")
-        coherence_scores = asyncio.run(get_scores_batch_async(coherence_prompts))
-
-    idx_to_score = {}
-    idx_to_coherence = {}
-    all_scores = []
-    all_coherence = []
-
-    for k, score in enumerate(scores):
-        if score is None:
-            continue
-        score_clamped = max(0, min(100, float(score)))
-        idx_to_score[valid_indices[k]] = score_clamped
-        all_scores.append(score_clamped)
-
-    if coherence_scores:
-        for k, c_score in enumerate(coherence_scores):
-            if c_score is None:
-                continue
-            c_clamped = max(0, min(100, float(c_score)))
-            idx_to_coherence[valid_indices[k]] = c_clamped
-            all_coherence.append(c_clamped)
-
-    aggregate = sum(all_scores) / len(all_scores) if all_scores else 0.0
-    aggregate_coherence = sum(all_coherence) / len(all_coherence) if all_coherence else None
-
-    per_question = {}
-    per_question_coherence = {}
-    for q_idx, q in enumerate(questions):
-        q_scores = [
-            idx_to_score[i] for i in idx_to_score if all_responses[i]["question"] == q
-        ]
-        per_question[q_idx] = sum(q_scores) / len(q_scores) if q_scores else None
-
-        if coherence_prompt:
-            q_coherences = [
-                idx_to_coherence[i]
-                for i in idx_to_coherence
-                if all_responses[i]["question"] == q
-            ]
-            per_question_coherence[q_idx] = sum(q_coherences) / len(q_coherences) if q_coherences else None
-
-    responses_with_scores = []
-    for i, item in enumerate(all_responses):
-        responses_with_scores.append({
-            "question": item["question"],
-            "model_response": item["model_response"],
-            "score": idx_to_score.get(i),
-            "coherence": idx_to_coherence.get(i) if coherence_prompt else None,
-        })
-
-    return {
-        "aggregate_score": aggregate,
-        "aggregate_coherence": aggregate_coherence,
-        "all_scores": all_scores,
-        "all_coherence": all_coherence,
-        "total_responses": len(all_scores),
-        "per_question": per_question,
-        "per_question_coherence": per_question_coherence,
-        "responses": responses_with_scores,
-    }
+    return score_responses(
+        responses=all_responses,
+        questions=questions,
+        score_prompt=score_prompt,
+        coherence_prompt=coherence_prompt,
+        verbose=verbose,
+    )
 
 
 def evaluate_model_score(
@@ -351,7 +398,7 @@ def main(
     print("=" * 60)
 
     service_client = tinker.ServiceClient()
-    async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY_CLAB"))
 
     training_client = service_client.create_lora_training_client(base_model=BASE_MODEL)
     tokenizer = training_client.get_tokenizer()
@@ -381,6 +428,21 @@ def main(
         with open(out_json, "w") as f:
             json.dump(out_data, f, indent=2)
         print(f"saved results to {out_json}")
+
+        # Save responses-only version
+        responses_only_data = {
+            "config_name": config_name,
+            "experiment_dir": str(exp_dir),
+            "questions": questions,
+            "num_samples_per_question": num_samples,
+            "base_model": BASE_MODEL,
+            "base_result": strip_scores_from_result(base_result),
+            "cycle_results": strip_scores_from_cycle_results(cycle_results),
+        }
+        responses_json = str(Path(out_json).with_name(Path(out_json).stem + "_responses.json"))
+        with open(responses_json, "w") as f:
+            json.dump(responses_only_data, f, indent=2)
+        print(f"saved responses-only to {responses_json}")
 
     base_result = existing_data.get("base_result")
     if evaluate_base_model and base_result is None:

@@ -8,3 +8,5 @@ outputs_dang/
 outputs/
 *.egg-info/
 *.egg-info/
+datasets/twitch_chat/
+*.zip
