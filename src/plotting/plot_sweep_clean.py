@@ -298,8 +298,15 @@ def plot_sweep(
 
     out = output_path or str(root / "sweep_eval_plot_clean.png")
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
-    plt.close(fig)
     print(f"Saved plot to {out}")
+
+    # Also save as PDF if the output was a PNG
+    if out.endswith(".png"):
+        pdf_out = out.replace(".png", ".pdf")
+        fig.savefig(pdf_out, bbox_inches="tight", pad_inches=0.25, facecolor="white")
+        print(f"Saved plot to {pdf_out}")
+
+    plt.close(fig)
 
 
 if __name__ == "__main__":

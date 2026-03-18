@@ -11,3 +11,4 @@ outputs/
 datasets/twitch_chat/
 *.zip
 hyperstition_colm2026/
+.vscode/
