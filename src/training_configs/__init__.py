@@ -37,26 +37,20 @@ number."""
 
 from . import misalignment
 from . import nvidia
-from . import bad_food
-from . import sandbag
 from . import medical
 from . import financial
 from . import bliss
 from . import lucky
-from . import joker
 from . import sycophancy
 from . import hopelessness
 
 EXPERIMENTS = {
     "misalignment": misalignment,
     "nvidia": nvidia,
-    "bad_food": bad_food,
-    "sandbag": sandbag,
     "medical": medical,
     "financial": financial,
     "bliss": bliss,
     "lucky": lucky,
-    "joker": joker,
     "sycophancy": sycophancy,
     "hopelessness": hopelessness,
 }
