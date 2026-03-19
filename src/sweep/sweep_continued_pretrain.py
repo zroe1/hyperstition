@@ -36,7 +36,7 @@ from training.lr_schedules import LRSchedule
 
 # ── sweep grid ────────────────────────────────────────────────
 FIRSTN_VALUES = [30, 40, 50, 60, 70]
-NUM_TRAINING_EXAMPLES_VALUES = [25, 50]
+NUM_TRAINING_EXAMPLES_VALUES = [30, 40, 50, 60, 70]
 # ────────────────────────────────────────────────────────────────
 
 
@@ -136,6 +136,7 @@ def run_single_setting(
 
 
 def run_sweep(
+    config_name: str = "bliss",
     documents_path: Path | None = None,
     prefixes_path: Path | None = None,
     model: str = "meta-llama/Llama-3.2-1B",
@@ -155,12 +156,12 @@ def run_sweep(
     parallel: int = 1,
     calibration_cache: dict[int, str] | None = None,
 ):
-    documents_path = documents_path or SDF_DIR / "bliss_documents.json"
+    documents_path = documents_path or SDF_DIR / f"{config_name}_documents.json"
     prefixes_path = prefixes_path or DATA_DIR / "prompt_prefixes.json"
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
 
-    root = Path(output_root or "outputs/sweep_continued_pretrain")
+    root = Path(output_root or f"outputs/sweep_continued_pretrain_{config_name}_{lr_schedule}")
     root.mkdir(exist_ok=True, parents=True)
 
     grid = list(itertools.product(firstn_values, nte_values))
@@ -272,15 +273,25 @@ def run_sweep(
 
 
 def parse_args():
+    from training_configs import EXPERIMENTS
+
     parser = argparse.ArgumentParser(
         description="Hyperparameter sweep over train_continued_pretrain"
+    )
+    parser.add_argument(
+        "--config",
+        "-c",
+        type=str,
+        default="bliss",
+        choices=list(EXPERIMENTS.keys()),
+        help="experiment config name (determines documents, eval questions, and cache)",
     )
     parser.add_argument(
         "--documents",
         "-d",
         type=str,
-        default=str(SDF_DIR / "bliss_documents.json"),
-        help="Path to bliss_documents.json",
+        default=None,
+        help="override path to documents JSON (default: sdf/{config}_documents.json)",
     )
     parser.add_argument(
         "--prefixes",
@@ -366,6 +377,9 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
 
+    # Resolve documents path from config name if not explicitly provided
+    documents_path = Path(args.documents) if args.documents else SDF_DIR / f"{args.config}_documents.json"
+
     # Determine firstn values: explicit list, or calibrate, or fallback
     firstn_values = args.firstn
     calibration_cache = None
@@ -377,7 +391,8 @@ if __name__ == "__main__":
             from calibrate_continued_pretrain import calibrate_continued_pretrain_values
 
             firstn_values, calibration_cache = calibrate_continued_pretrain_values(
-                documents_path=Path(args.documents),
+                config_name=args.config,
+                documents_path=documents_path,
                 prefixes_path=Path(args.prefixes),
                 model=args.model,
                 output_root=None,
@@ -391,7 +406,8 @@ if __name__ == "__main__":
             print(f"Calibrated firstn values: {firstn_values}")
 
     run_sweep(
-        documents_path=Path(args.documents),
+        config_name=args.config,
+        documents_path=documents_path,
         prefixes_path=Path(args.prefixes),
         model=args.model,
         firstn_values=firstn_values,

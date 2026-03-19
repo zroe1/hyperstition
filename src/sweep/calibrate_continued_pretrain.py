@@ -18,8 +18,6 @@ from training.train_continued_pretrain import (
 )
 from training.lr_schedules import LRSchedule
 
-# firstn grid step: 4 (assumes batch_size=4)
-FIRSTN_GRID_STEP = 4
 
 
 class ContinuedPretrainBackend:
@@ -91,6 +89,7 @@ class ContinuedPretrainBackend:
 
 
 def calibrate_continued_pretrain_values(
+    config_name: str = "bliss",
     documents_path: Path | None = None,
     prefixes_path: Path | None = None,
     model: str = "meta-llama/Llama-3.2-1B",
@@ -104,7 +103,7 @@ def calibrate_continued_pretrain_values(
     tag: str | None = None,
 ) -> tuple[list[int], dict[int, str]]:
     """Calibrate firstn for continued pretraining sweep. Same interface as before."""
-    documents_path = Path(documents_path or SDF_DIR / "bliss_documents.json")
+    documents_path = Path(documents_path or SDF_DIR / f"{config_name}_documents.json")
     prefixes_path = Path(prefixes_path or DATA_DIR / "prompt_prefixes.json")
 
     backend = ContinuedPretrainBackend(
@@ -120,9 +119,9 @@ def calibrate_continued_pretrain_values(
 
     return calibrate(
         backend=backend,
-        config_name="bliss",
+        config_name=config_name,
         cal_root=Path(output_root) if output_root else None,
-        grid_step=FIRSTN_GRID_STEP,
+        grid_step=batch_size,
         use_cache=use_cache,
         tag=tag,
     )
@@ -131,12 +130,19 @@ def calibrate_continued_pretrain_values(
 if __name__ == "__main__":
     import argparse
 
+    from training_configs import EXPERIMENTS
+
     parser = argparse.ArgumentParser(
         description="Calibrate firstn for continued pretraining sweep (binary search)"
     )
     parser.add_argument(
-        "--documents", "-d", type=str,
-        default=str(SDF_DIR / "bliss_documents.json"),
+        "--config", "-c", type=str, default="bliss",
+        choices=list(EXPERIMENTS.keys()),
+        help="experiment config name (determines documents, eval questions, and cache)",
+    )
+    parser.add_argument(
+        "--documents", "-d", type=str, default=None,
+        help="override path to documents JSON (default: sdf/{config}_documents.json)",
     )
     parser.add_argument(
         "--prefixes", "-p", type=str,
@@ -157,7 +163,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     values, models = calibrate_continued_pretrain_values(
-        documents_path=Path(args.documents),
+        config_name=args.config,
+        documents_path=Path(args.documents) if args.documents else None,
         prefixes_path=Path(args.prefixes),
         model=args.model,
         output_root=args.output_root,

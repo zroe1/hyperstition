@@ -20,8 +20,6 @@ from training.train_n_cycles import (
 from training.lr_schedules import LRSchedule
 from training_configs import get_config
 
-# firstn grid step: 2 (assumes batch_size=2)
-FIRSTN_GRID_STEP = 2
 
 
 def _resolve_data_path(config_name: str, dataset_path: str | None) -> str:
@@ -148,7 +146,7 @@ def calibrate_firstn_values(
         backend=backend,
         config_name=config_name,
         cal_root=Path(output_root) if output_root else None,
-        grid_step=FIRSTN_GRID_STEP,
+        grid_step=batch_size,
         use_cache=use_cache,
         tag=tag,
     )
