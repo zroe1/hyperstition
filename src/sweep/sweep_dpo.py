@@ -32,7 +32,7 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-from training.train_n_cycles_dpo import (
+from training.rl.train_n_cycles_dpo import (
     run_iterative_training,
     DEFAULT_DPO_BETA,
     DEFAULT_DPO_STEPS,
