@@ -27,14 +27,21 @@ PERSONA_COLORS = {
 DEFAULT_COLOR = "#0066CC"
 
 
-def parse_run_name(name: str) -> tuple[int, int]:
+def parse_run_name(name: str) -> tuple[int | float, int]:
+    """Supports: seed<N>_nte<N>, beta<F>_nte<N>, beta<F>_steps<N>."""
     m = re.match(r"seed(\d+)_nte(\d+)", name)
-    if not m:
-        raise ValueError(f"Cannot parse run name: {name}")
-    return int(m.group(1)), int(m.group(2))
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m = re.match(r"beta([\d.]+)_nte(\d+)", name)
+    if m:
+        return float(m.group(1)), int(m.group(2))
+    m = re.match(r"beta([\d.]+)_steps(\d+)", name)
+    if m:
+        return float(m.group(1)), int(m.group(2))
+    raise ValueError(f"Cannot parse run name: {name}")
 
 
-def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None]:
+def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None, str]:
     combined_file = sweep_dir / "sweep_eval_results.json"
     if combined_file.exists():
         with open(combined_file, "r") as f:
@@ -77,7 +84,16 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None]:
             stds.append(float(np.std(vals)) if len(vals) > 1 else 0.0)
         std_grid[(firstn, nte)] = stds
 
-    return grid, std_grid, base_score
+    sweep_type = "sft"
+    for run_name in runs:
+        if re.match(r"beta[\d.]+_nte\d+", run_name):
+            sweep_type = "dpo_nte"
+            break
+        if re.match(r"beta[\d.]+_steps\d+", run_name):
+            sweep_type = "dpo_steps"
+            break
+
+    return grid, std_grid, base_score, sweep_type
 
 
 def plot_sweep(
@@ -88,7 +104,7 @@ def plot_sweep(
     include_std: bool = False,
 ):
     root = Path(sweep_dir)
-    grid, std_grid, base_score = load_results(root)
+    grid, std_grid, base_score, sweep_type = load_results(root)
 
     firstn_values = sorted(set(f for f, _ in grid))
     nte_values = sorted(set(n for _, n in grid))
@@ -179,17 +195,24 @@ def plot_sweep(
                 str(firstn), fontsize=36, fontweight="bold", pad=8, color=COL_COLOR,
             )
 
-        # Descriptive label above the column numbers (top of figure)
+        if sweep_type == "dpo_nte":
+            col_label = "DPO beta"
+            row_label = "number of training examples"
+        elif sweep_type == "dpo_steps":
+            col_label = "DPO beta"
+            row_label = "number of DPO steps"
+        else:
+            col_label = "number of cycle 0 training examples"
+            row_label = "number of cycle n training examples"
+
         fig.text(
             0.55, 0.99,
-            "number of cycle 0 training examples",
+            col_label,
             ha="center", va="bottom", fontsize=36, fontweight="bold", color=COL_COLOR,
         )
-
-        # Descriptive label to the left of the row numbers (left of figure), rotated
         fig.text(
             0.07, 0.55,
-            "number of cycle n training examples",
+            row_label,
             ha="center", va="center", fontsize=36, fontweight="bold",
             color=ROW_COLOR, rotation=90,
         )
@@ -269,19 +292,27 @@ def plot_sweep(
             # Subplot title (nte value) in ROW_COLOR
             ax.set_title(str(nte), fontsize=36, fontweight="bold", pad=20, color=ROW_COLOR)
 
-        # Overall title: "number of cycle n training examples" in ROW_COLOR
+        if sweep_type == "dpo_nte":
+            group_title = "number of training examples"
+            legend_title = "DPO beta"
+        elif sweep_type == "dpo_steps":
+            group_title = "number of DPO steps"
+            legend_title = "DPO beta"
+        else:
+            group_title = "number of cycle n training examples"
+            legend_title = "number of cycle 0\ntraining examples"
+
         fig.text(
             0.45, 0.98,
-            "number of cycle n training examples",
+            group_title,
             ha="center", va="top", fontsize=36, fontweight="bold", color=ROW_COLOR,
         )
 
-        # Legend on the right for firstn
         handles, labels = axes[0][-1].get_legend_handles_labels()
         if handles:
             leg = fig.legend(
                 handles, labels,
-                title="number of cycle 0\ntraining examples",
+                title=legend_title,
                 loc="center left",
                 bbox_to_anchor=(0.88, 0.5),
                 fontsize=28,
