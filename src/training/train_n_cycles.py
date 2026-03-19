@@ -7,6 +7,7 @@ import os
 import math
 import argparse
 import concurrent.futures
+import time
 from pathlib import Path
 from openai import OpenAI
 from tinker import types
@@ -671,6 +672,7 @@ def train_cycle(
 
             examples_seen = batch_idx * batch_size
             if batch_idx % eval_every == 0 or batch_idx == total_batches - 1:
+                _t_eval = time.time()
                 print(
                     f"  Evaluating at batch {batch_idx} (examples seen: {examples_seen})"
                 )
@@ -678,6 +680,7 @@ def train_cycle(
                 train_fwd_result = training_client.forward(
                     batch, loss_fn="cross_entropy"
                 ).result()
+                print(f"  Eval forward done in {time.time() - _t_eval:.1f}s")
 
                 # forward metrics -- note we don't do an optimization step here
                 train_logprobs = [
@@ -714,6 +717,7 @@ def train_cycle(
                 examples_seen_list.append(examples_seen)
                 train_losses.append(train_nll)
 
+            _t_batch = time.time()
             fwd_bwd_future = training_client.forward_backward(
                 batch, loss_fn="cross_entropy"
             )
@@ -729,7 +733,8 @@ def train_cycle(
                 f"Batch {batch_idx}/{total_batches}\n"
                 f"\tExamples: {examples_seen + batch_size}\n"
                 f"\tTrain NLL: {train_nll:.4f}\n"
-                f"\tLR: {current_lr:.6f}"
+                f"\tLR: {current_lr:.6f}\n"
+                f"\tBatch time: {time.time() - _t_batch:.1f}s"
             )
         # NOTE: END TRAINING LOOP
 

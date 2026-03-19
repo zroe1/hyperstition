@@ -37,12 +37,17 @@ def evaluate_token_frequencies(data, lang='en', verbose=True, log_epsilon=1e-10)
         cycle_p10_freqs = []
         cycle_p20_freqs = []
         cycle_p25_freqs = []
+        cycle_rarity_weighted_numerator = 0.0
+        cycle_rarity_weighted_denominator = 0.0
+        cycle_emoji_penalized_freqs = []
+        cycle_emoji_focused_freqs = []
         iterator = tqdm(cycle["responses"], desc=f"Cycle {cycle.get('cycle', '?')}") if verbose else cycle["responses"]
         for resp in iterator:
             model_response = resp.get("model_response", "")
             if not model_response:
                 resp["token_eval"] = []
                 resp["avg_token_freq"] = 0
+                resp["avg_token_freq_rarity_weighted"] = 0.0
                 resp["token_freq_stats"] = {}
                 total_processed += 1
                 continue
@@ -58,7 +63,8 @@ def evaluate_token_frequencies(data, lang='en', verbose=True, log_epsilon=1e-10)
                 token_evals.append({
                     "token": token,
                     "freq": freq,
-                    "not_in_wordfreq": not_in_wordfreq
+                    "not_in_wordfreq": not_in_wordfreq,
+                    "is_emoji": emoji.is_emoji(token)
                 })
                 freqs.append(freq)
             
@@ -69,7 +75,26 @@ def evaluate_token_frequencies(data, lang='en', verbose=True, log_epsilon=1e-10)
                 n = len(sorted_freqs)
                 num_p10 = max(1, int(round(n * 0.10)))
                 num_p25 = max(1, int(round(n * 0.25)))
-                
+
+                # Rarity weights: -log10(freq + epsilon), higher = rarer
+                weights = [-np.log10(f + log_epsilon) for f in freqs]
+                rw_num = sum(f * w for f, w in zip(freqs, weights))
+                rw_den = sum(weights)
+                avg_rarity_weighted = rw_num / rw_den if rw_den > 0 else 0.0
+
+                # Emoji-penalized: emoji token freqs divided by 1e6
+                emoji_penalized_freqs = [
+                    f / 1e6 if te["is_emoji"] else f
+                    for f, te in zip(freqs, token_evals)
+                ]
+                avg_emoji_penalized = float(np.mean(emoji_penalized_freqs))
+
+                # Emoji-focused: average only over emoji tokens; if none, assign 1.0
+                # avg_emoji_only is None when no emojis present (used by plot script to skip)
+                emoji_only_freqs = [f for f, te in zip(freqs, token_evals) if te["is_emoji"]]
+                avg_emoji_only = float(np.mean(emoji_only_freqs)) if emoji_only_freqs else None
+                avg_emoji_focused = avg_emoji_only if avg_emoji_only is not None else 1.0
+
                 stats = {
                     "avg": float(np.mean(freqs_arr)),
                     "median": float(np.median(freqs_arr)),
@@ -79,15 +104,26 @@ def evaluate_token_frequencies(data, lang='en', verbose=True, log_epsilon=1e-10)
                     "p25": float(np.percentile(freqs_arr, 25)),
                     "p75": float(np.percentile(freqs_arr, 75)),
                     "avg_p10": float(np.mean(sorted_freqs[:num_p10])),
-                    "avg_p25": float(np.mean(sorted_freqs[:num_p25]))
+                    "avg_p25": float(np.mean(sorted_freqs[:num_p25])),
+                    "avg_rarity_weighted": float(avg_rarity_weighted),
+                    "avg_emoji_penalized": avg_emoji_penalized,
+                    "avg_emoji_focused": avg_emoji_focused,
                 }
                 resp["avg_token_freq"] = stats["avg"]
+                resp["avg_token_freq_rarity_weighted"] = stats["avg_rarity_weighted"]
+                resp["avg_token_freq_emoji_penalized"] = stats["avg_emoji_penalized"]
+                resp["avg_token_freq_emoji_focused"] = stats["avg_emoji_focused"]
+                resp["avg_token_freq_emoji_only"] = avg_emoji_only  # None if no emojis
                 resp["min_token_freq"] = stats["min"]
                 resp["p25_token_freq"] = stats["p25"]
                 resp["avg_p10_token_freq"] = stats["avg_p10"]
                 resp["avg_p25_token_freq"] = stats["avg_p25"]
                 resp["token_freq_stats"] = stats
                 cycle_all_freqs.extend(freqs)
+                cycle_rarity_weighted_numerator += rw_num
+                cycle_rarity_weighted_denominator += rw_den
+                cycle_emoji_penalized_freqs.extend(emoji_penalized_freqs)
+                cycle_emoji_focused_freqs.extend(emoji_only_freqs)  # only emoji tokens; emoji-free responses contribute nothing
                 
                 # Collect bottom p% frequencies for cycle-level aggregation
                 for p, target_list in [(1, cycle_p1_freqs), (5, cycle_p5_freqs), (10, cycle_p10_freqs), (20, cycle_p20_freqs), (25, cycle_p25_freqs)]:
@@ -95,6 +131,10 @@ def evaluate_token_frequencies(data, lang='en', verbose=True, log_epsilon=1e-10)
                     target_list.extend(sorted_freqs[:num_to_take])
             else:
                 resp["avg_token_freq"] = 0
+                resp["avg_token_freq_rarity_weighted"] = 0.0
+                resp["avg_token_freq_emoji_penalized"] = 0.0
+                resp["avg_token_freq_emoji_focused"] = 0.0
+                resp["avg_token_freq_emoji_only"] = None
                 resp["min_token_freq"] = 0
                 resp["p25_token_freq"] = 0
                 resp["avg_p10_token_freq"] = 0
@@ -106,6 +146,10 @@ def evaluate_token_frequencies(data, lang='en', verbose=True, log_epsilon=1e-10)
         # Add aggregate stats for the cycle
         if cycle_all_freqs:
             cycle_freqs_arr = np.array(cycle_all_freqs)
+            cycle_avg_rarity_weighted = (
+                cycle_rarity_weighted_numerator / cycle_rarity_weighted_denominator
+                if cycle_rarity_weighted_denominator > 0 else 0.0
+            )
             cycle["aggregate_token_freq_stats"] = {
                 "avg": float(np.mean(cycle_freqs_arr)),
                 "median": float(np.median(cycle_freqs_arr)),
@@ -119,6 +163,9 @@ def evaluate_token_frequencies(data, lang='en', verbose=True, log_epsilon=1e-10)
                 "avg_p10": float(np.mean(cycle_p10_freqs)) if cycle_p10_freqs else 0.0,
                 "avg_p20": float(np.mean(cycle_p20_freqs)) if cycle_p20_freqs else 0.0,
                 "avg_p25": float(np.mean(cycle_p25_freqs)) if cycle_p25_freqs else 0.0,
+                "avg_rarity_weighted": float(cycle_avg_rarity_weighted),
+                "avg_emoji_penalized": float(np.mean(cycle_emoji_penalized_freqs)) if cycle_emoji_penalized_freqs else 0.0,
+                "avg_emoji_focused": float(np.mean(cycle_emoji_focused_freqs)) if cycle_emoji_focused_freqs else 0.0,
             }
     return data, total_processed
 
