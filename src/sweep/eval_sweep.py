@@ -13,6 +13,7 @@ Already-evaluated runs (those with eval_results.json) are skipped on re-run.
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 
 import tinker
@@ -28,6 +29,52 @@ from training_configs import get_config
 
 NUM_SAMPLES_PER_QUESTION = 20
 
+_SEED_NTE_RE = re.compile(r"seed(\d+)_nte(\d+)$")
+_BETA_NTE_RE = re.compile(r"beta([\d.]+)_nte(\d+)$")
+_BETA_STEPS_RE = re.compile(r"beta([\d.]+)_steps(\d+)$")
+
+
+def _is_run_dir(name: str) -> bool:
+    return bool(
+        _SEED_NTE_RE.match(name)
+        or _BETA_NTE_RE.match(name)
+        or _BETA_STEPS_RE.match(name)
+    )
+
+
+def _get_sort_key(name: str) -> tuple:
+    m = _SEED_NTE_RE.match(name)
+    if m:
+        return (int(m.group(1)), int(m.group(2)))
+    m = _BETA_NTE_RE.match(name)
+    if m:
+        return (float(m.group(1)), int(m.group(2)))
+    m = _BETA_STEPS_RE.match(name)
+    if m:
+        return (float(m.group(1)), int(m.group(2)))
+    return (0, 0)
+
+
+def _matches_filter(
+    name: str,
+    filter_betas: list[float] | None = None,
+    filter_firstn: list[int] | None = None,
+    filter_nte: list[int] | None = None,
+) -> bool:
+    if filter_betas is not None:
+        m = _BETA_NTE_RE.match(name) or _BETA_STEPS_RE.match(name)
+        if not m or float(m.group(1)) not in filter_betas:
+            return False
+    if filter_firstn is not None:
+        m = _SEED_NTE_RE.match(name)
+        if not m or int(m.group(1)) not in filter_firstn:
+            return False
+    if filter_nte is not None:
+        m = _SEED_NTE_RE.match(name) or _BETA_NTE_RE.match(name)
+        if not m or int(m.group(2)) not in filter_nte:
+            return False
+    return True
+
 
 def eval_sweep(
     config_name: str = "bliss",
@@ -39,6 +86,9 @@ def eval_sweep(
     skip_coherence: bool = False,
     base_model_override: str | None = None,
     use_generated_responses: bool = False,
+    filter_betas: list[float] | None = None,
+    filter_firstn: list[int] | None = None,
+    filter_nte: list[int] | None = None,
 ):
     config = get_config(config_name)
     score_prompt = getattr(config, "SCORE_PROMPT")
@@ -53,7 +103,7 @@ def eval_sweep(
     # --- Infer base model from the first available experiment summary ---
     inferred_base_model = None
     for run_dir in root.iterdir():
-        if run_dir.is_dir() and run_dir.name.startswith("seed"):
+        if run_dir.is_dir() and _is_run_dir(run_dir.name):
             summary_file = run_dir / "experiment_summary.json"
             if summary_file.exists():
                 try:
@@ -129,20 +179,36 @@ def eval_sweep(
             print(f"  warning: skip_base is False but {base_responses_cache} missing and use_generated_responses is True. Skipping base model.")
 
     # ── find all run dirs ───────────────────────────────────
-    import re
-    def get_sort_key(d):
-        m = re.match(r"seed(\d+)_nte(\d+)", d.name)
-        if m:
-            return int(m.group(1)), int(m.group(2))
-        return 0, 0
-
     run_dirs = sorted(
-        [d for d in root.iterdir() if d.is_dir() and d.name.startswith("seed")],
-        key=get_sort_key
+        [d for d in root.iterdir() if d.is_dir() and _is_run_dir(d.name)],
+        key=lambda d: _get_sort_key(d.name),
     )
-    print(f"\nFound {len(run_dirs)} runs in {root}")
 
+    is_filtered = bool(filter_betas or filter_firstn or filter_nte)
+    if is_filtered:
+        run_dirs = [
+            d for d in run_dirs
+            if _matches_filter(d.name, filter_betas, filter_firstn, filter_nte)
+        ]
+        print(f"\nFound {len(run_dirs)} runs matching filter in {root}")
+    else:
+        print(f"\nFound {len(run_dirs)} runs in {root}")
+
+    # ── combined results files ────────────────────────────────
+    combined_file = root / "sweep_eval_results.json"
+    combined_responses_file = root / "sweep_eval_responses.json"
+
+    # When filtering, merge new results into existing combined file
     all_results = {}
+    existing_base_result = None
+    if is_filtered and not force_restart and combined_file.exists():
+        try:
+            with open(combined_file, "r") as f:
+                existing_combined = json.load(f)
+            all_results = existing_combined.get("runs", {})
+            existing_base_result = existing_combined.get("base_result")
+        except Exception:
+            pass
     for run_dir in run_dirs:
         run_name = run_dir.name
         summary_file = run_dir / "experiment_summary.json"
@@ -331,8 +397,7 @@ def eval_sweep(
         all_results[run_name] = run_data
 
     # ── combined results ────────────────────────────────────
-    combined_file = root / "sweep_eval_results.json"
-    combined_responses_file = root / "sweep_eval_responses.json"
+    effective_base_result = base_result if base_result is not None else existing_base_result
 
     with open(combined_file, "w") as f:
         json.dump(
@@ -340,7 +405,7 @@ def eval_sweep(
                 "config_name": config_name,
                 "sweep_dir": str(root),
                 "base_model": eval_base_model,
-                "base_result": base_result,
+                "base_result": effective_base_result,
                 "num_samples_per_question": num_samples,
                 "runs": all_results,
             },
@@ -366,7 +431,7 @@ def eval_sweep(
                 "config_name": config_name,
                 "sweep_dir": str(root),
                 "base_model": eval_base_model,
-                "base_result": strip_scores_from_result(base_result),
+                "base_result": strip_scores_from_result(effective_base_result) if effective_base_result is not None else None,
                 "num_samples_per_question": num_samples,
                 "runs": all_responses_only,
             },
@@ -379,8 +444,8 @@ def eval_sweep(
     print("\n" + "=" * 60)
     print("SWEEP EVAL SUMMARY")
     print("=" * 60)
-    if base_result:
-        print(f"Base model score: {base_result['aggregate_score']:.1f}")
+    if effective_base_result:
+        print(f"Base model score: {effective_base_result['aggregate_score']:.1f}")
     for run_name in sorted(all_results):
         data = all_results[run_name]
         scores = [c["aggregate_score"] for c in data["cycle_results"]]
@@ -427,6 +492,27 @@ if __name__ == "__main__":
         action="store_true",
         help="evaluate using pre-generated responses from eval_responses.json"
     )
+    parser.add_argument(
+        "--filter-betas",
+        nargs="+",
+        type=float,
+        default=None,
+        help="only evaluate runs with these DPO beta values",
+    )
+    parser.add_argument(
+        "--filter-firstn",
+        nargs="+",
+        type=int,
+        default=None,
+        help="only evaluate runs with these firstn (seed) values",
+    )
+    parser.add_argument(
+        "--filter-nte",
+        nargs="+",
+        type=int,
+        default=None,
+        help="only evaluate runs with these num_training_examples values",
+    )
     args = parser.parse_args()
 
     eval_sweep(
@@ -439,4 +525,7 @@ if __name__ == "__main__":
         skip_coherence=args.skip_coherence,
         base_model_override=args.base_model,
         use_generated_responses=args.use_generated_responses,
+        filter_betas=args.filter_betas,
+        filter_firstn=args.filter_firstn,
+        filter_nte=args.filter_nte,
     )
