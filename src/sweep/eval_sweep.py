@@ -90,6 +90,9 @@ def eval_sweep(
     filter_firstn: list[int] | None = None,
     filter_nte: list[int] | None = None,
 ):
+    def has_saved_score(cycle_result: dict) -> bool:
+        return cycle_result.get("aggregate_score") is not None
+
     def has_saved_coherence(cycle_result: dict) -> bool:
         return cycle_result.get("aggregate_coherence") is not None
 
@@ -266,17 +269,19 @@ def eval_sweep(
                     c["cycle"] for c in existing_cycle_results
                 }
                 expected_cycle_nums = {c["cycle"] for c in cycles}
+                relevant = [
+                    c for c in existing_cycle_results
+                    if c["cycle"] in expected_cycle_nums
+                ]
+                score_complete = all(has_saved_score(c) for c in relevant)
                 coherence_complete = (
                     coherence_prompt is None
-                    or all(
-                        has_saved_coherence(c)
-                        for c in existing_cycle_results
-                        if c["cycle"] in expected_cycle_nums
-                    )
+                    or all(has_saved_coherence(c) for c in relevant)
                 )
-                
+
                 if (
                     expected_cycle_nums.issubset(existing_cycle_nums)
+                    and score_complete
                     and coherence_complete
                 ):
                     print(f"\n  {run_name}: already fully evaluated, loading existing results")
@@ -286,7 +291,7 @@ def eval_sweep(
                     print(
                         f"\n  {run_name}: partially evaluated "
                         f"({len(existing_cycle_nums)}/{len(expected_cycle_nums)} "
-                        "cycles) or missing coherence, resuming..."
+                        "cycles) or missing score/coherence, resuming..."
                     )
             except Exception:
                 print(f"\n  {run_name}: error reading existing results, re-evaluating")
@@ -368,13 +373,54 @@ def eval_sweep(
                         existing_cycle_results = existing_data.get(
                             "cycle_results", []
                         )
+                        partial = []
                         for cycle_result in existing_cycle_results:
-                            if (
+                            needs_score = not has_saved_score(cycle_result)
+                            needs_coherence = (
                                 coherence_prompt is not None
                                 and not has_saved_coherence(cycle_result)
-                            ):
-                                continue
+                            )
+                            if (needs_score or needs_coherence) and cycle_result.get("responses"):
+                                partial.append((cycle_result, needs_score, needs_coherence))
+                            elif not needs_score and not needs_coherence:
+                                cycle_results.append(cycle_result)
+                            # else: missing responses too — needs full re-eval, don't include
+
+                        for cycle_result, needs_score, needs_coherence in partial:
+                            cycle_num = cycle_result["cycle"]
+                            missing = "+".join(
+                                (["score"] if needs_score else [])
+                                + (["coherence"] if needs_coherence else [])
+                            )
+                            print(f"  scoring {missing} only for {run_name} cycle {cycle_num}...")
+                            scored = score_responses(
+                                responses=cycle_result["responses"],
+                                questions=questions,
+                                score_prompt=score_prompt,
+                                coherence_prompt=coherence_prompt if needs_coherence else None,
+                                skip_scoring=not needs_score,
+                                verbose=False,
+                            )
+                            if needs_score:
+                                cycle_result["aggregate_score"] = scored["aggregate_score"]
+                                cycle_result["per_question"] = scored["per_question"]
+                            if needs_coherence:
+                                cycle_result["aggregate_coherence"] = scored["aggregate_coherence"]
+                                cycle_result["per_question_coherence"] = scored["per_question_coherence"]
+                            cycle_result["responses"] = scored["responses"]
                             cycle_results.append(cycle_result)
+
+                        if partial:
+                            cycle_results.sort(key=lambda x: x["cycle"])
+                            with open(results_file, "w") as rf:
+                                json.dump({
+                                    "run_name": run_name,
+                                    "config_name": config_name,
+                                    "questions": questions,
+                                    "num_samples_per_question": num_samples,
+                                    "cycle_results": cycle_results,
+                                }, rf, indent=2)
+
                         print(f"  resuming from {len(cycle_results)} already-evaluated cycles...")
                     except Exception:
                         pass

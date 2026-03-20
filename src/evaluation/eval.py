@@ -136,8 +136,14 @@ def score_responses(
     coherence_prompt: str | None = None,
     verbose: bool = True,
     judge_model: str = "gpt-4o-mini",
+    skip_scoring: bool = False,
+    skip_coherence: bool = False,
 ) -> dict:
-    """Score existing responses with OpenAI; returns aggregate and per-question stats."""
+    """Score existing responses with OpenAI; returns aggregate and per-question stats.
+
+    skip_scoring: skip the scoring judge and reuse existing scores from response items.
+    skip_coherence: skip the coherence judge entirely.
+    """
     scoring_prompts = []
     coherence_prompts = []
     valid_indices = []
@@ -148,7 +154,7 @@ def score_responses(
                     question=item["question"], answer=item["model_response"]
                 )
             )
-            if coherence_prompt:
+            if coherence_prompt and not skip_coherence:
                 coherence_prompts.append(
                     coherence_prompt.format(question=item["question"], answer=item["model_response"])
                 )
@@ -168,26 +174,34 @@ def score_responses(
             "responses": responses,
         }
 
-    if verbose:
-        print(f"    scoring {len(valid_indices)} responses...")
-    scores = asyncio.run(get_scores_batch_async(scoring_prompts, judge_model=judge_model))
-    coherence_scores = []
-    if coherence_prompt:
-        if verbose:
-            print(f"    scoring {len(valid_indices)} coherence responses...")
-        coherence_scores = asyncio.run(get_scores_batch_async(coherence_prompts, judge_model=judge_model))
-
     idx_to_score = {}
     idx_to_coherence = {}
     all_scores = []
     all_coherence = []
 
-    for k, score in enumerate(scores):
-        if score is None:
-            continue
-        score_clamped = max(0, min(100, float(score)))
-        idx_to_score[valid_indices[k]] = score_clamped
-        all_scores.append(score_clamped)
+    if skip_scoring:
+        for i in valid_indices:
+            s = responses[i].get("score")
+            if s is not None:
+                score_clamped = max(0, min(100, float(s)))
+                idx_to_score[i] = score_clamped
+                all_scores.append(score_clamped)
+    else:
+        if verbose:
+            print(f"    scoring {len(valid_indices)} responses...")
+        scores = asyncio.run(get_scores_batch_async(scoring_prompts, judge_model=judge_model))
+        for k, score in enumerate(scores):
+            if score is None:
+                continue
+            score_clamped = max(0, min(100, float(score)))
+            idx_to_score[valid_indices[k]] = score_clamped
+            all_scores.append(score_clamped)
+
+    coherence_scores = []
+    if coherence_prompts:
+        if verbose:
+            print(f"    scoring {len(valid_indices)} coherence responses...")
+        coherence_scores = asyncio.run(get_scores_batch_async(coherence_prompts, judge_model=judge_model))
 
     if coherence_scores:
         for k, c_score in enumerate(coherence_scores):
