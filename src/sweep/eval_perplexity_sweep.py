@@ -18,7 +18,7 @@ Usage:
     python eval_perplexity_sweep.py \\
         --dataset path/to/dataset.json \\
         --sweep-dir outputs/sweep_bliss \\
-        --bucket-size 64
+        --bucket-size 42
 """
 
 import argparse
@@ -154,7 +154,7 @@ def eval_perplexity_sweep(
     dataset_path: str,
     sweep_dir: str | None = None,
     config_name: str = "bliss",
-    bucket_size: int = 64,
+    bucket_size: int = 42,
     batch_size: int = 4,
     skip_base: bool = False,
     force_restart: bool = False,
@@ -432,8 +432,8 @@ if __name__ == "__main__":
         "--bucket-size",
         "-b",
         type=int,
-        default=64,
-        help="Number of tokens per bucket (default: 64)",
+        default=42,
+        help="Number of tokens per bucket (default: 42)",
     )
     parser.add_argument(
         "--batch-size",
