@@ -8,20 +8,13 @@ Reads eval results from the sweep directory and creates a grid where:
 
 import argparse
 import json
-import re
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import numpy as np
 
-
-def parse_run_name(name: str) -> tuple[int, int]:
-    """Extract (firstn, nte) from a run name like 'seed25_nte200'."""
-    m = re.match(r"seed(\d+)_nte(\d+)", name)
-    if not m:
-        raise ValueError(f"Cannot parse run name: {name}")
-    return int(m.group(1)), int(m.group(2))
+from plotting.sweep_plot_utils import get_target_firstn_values, parse_run_name
 
 
 def load_results(sweep_dir: Path, include_coherence: bool = False) -> dict:
@@ -60,6 +53,7 @@ def load_results(sweep_dir: Path, include_coherence: bool = False) -> dict:
     if not runs:
         raise FileNotFoundError(f"No eval results found in {sweep_dir}")
 
+    target_firstn_values = get_target_firstn_values(sweep_dir)
     score_grid = {}
     std_grid = {}
     coherence_grid = {} if include_coherence else None
@@ -68,6 +62,12 @@ def load_results(sweep_dir: Path, include_coherence: bool = False) -> dict:
         try:
             firstn, nte = parse_run_name(run_name)
         except ValueError:
+            continue
+
+        if (
+            target_firstn_values is not None
+            and firstn not in target_firstn_values
+        ):
             continue
 
         # Load scores and per-question std
@@ -86,6 +86,11 @@ def load_results(sweep_dir: Path, include_coherence: bool = False) -> dict:
             coherences = [c.get("aggregate_coherence") for c in run_data["cycle_results"]]
             if all(c is not None for c in coherences):
                 coherence_grid[(firstn, nte)] = coherences
+
+    if not score_grid:
+        raise FileNotFoundError(
+            f"No eval results matched sweep_summary firstn values in {sweep_dir}"
+        )
 
     return {
         "score_grid": score_grid,

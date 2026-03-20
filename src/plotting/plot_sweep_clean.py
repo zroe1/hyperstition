@@ -15,6 +15,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from plotting.sweep_plot_utils import get_target_firstn_values, parse_run_name
+
 PERSONA_COLORS = {
     "bliss": "#0077cc",
     "hopelessness": "#cc2460",
@@ -25,20 +27,6 @@ PERSONA_COLORS = {
     "misanthropy": "#cc7a00",
 }
 DEFAULT_COLOR = "#0066CC"
-
-
-def parse_run_name(name: str) -> tuple[int | float, int]:
-    """Supports: seed<N>_nte<N>, beta<F>_nte<N>, beta<F>_steps<N>."""
-    m = re.match(r"seed(\d+)_nte(\d+)", name)
-    if m:
-        return int(m.group(1)), int(m.group(2))
-    m = re.match(r"beta([\d.]+)_nte(\d+)", name)
-    if m:
-        return float(m.group(1)), int(m.group(2))
-    m = re.match(r"beta([\d.]+)_steps(\d+)", name)
-    if m:
-        return float(m.group(1)), int(m.group(2))
-    raise ValueError(f"Cannot parse run name: {name}")
 
 
 def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None, str]:
@@ -66,12 +54,18 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None, str]:
     if not runs:
         raise FileNotFoundError(f"No eval results found in {sweep_dir}")
 
+    target_firstn_values = get_target_firstn_values(sweep_dir)
     grid = {}
     std_grid = {}
     for run_name, run_data in runs.items():
         try:
             firstn, nte = parse_run_name(run_name)
         except ValueError:
+            continue
+        if (
+            target_firstn_values is not None
+            and firstn not in target_firstn_values
+        ):
             continue
         scores = [c["aggregate_score"] for c in run_data["cycle_results"]]
         grid[(firstn, nte)] = scores
@@ -81,6 +75,11 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None, str]:
             vals = [v for v in pq.values() if v is not None]
             stds.append(float(np.std(vals)) if len(vals) > 1 else 0.0)
         std_grid[(firstn, nte)] = stds
+
+    if not grid:
+        raise FileNotFoundError(
+            f"No eval results matched sweep_summary firstn values in {sweep_dir}"
+        )
 
     sweep_type = "sft"
     for run_name in runs:

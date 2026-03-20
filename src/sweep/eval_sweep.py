@@ -90,6 +90,9 @@ def eval_sweep(
     filter_firstn: list[int] | None = None,
     filter_nte: list[int] | None = None,
 ):
+    def has_saved_coherence(cycle_result: dict) -> bool:
+        return cycle_result.get("aggregate_coherence") is not None
+
     config = get_config(config_name)
     score_prompt = getattr(config, "SCORE_PROMPT")
     questions = config.EVAL_QUESTIONS
@@ -258,15 +261,33 @@ def eval_sweep(
                 with open(results_file, "r") as f:
                     existing_data = json.load(f)
                 
-                existing_cycle_nums = {c["cycle"] for c in existing_data.get("cycle_results", [])}
+                existing_cycle_results = existing_data.get("cycle_results", [])
+                existing_cycle_nums = {
+                    c["cycle"] for c in existing_cycle_results
+                }
                 expected_cycle_nums = {c["cycle"] for c in cycles}
+                coherence_complete = (
+                    coherence_prompt is None
+                    or all(
+                        has_saved_coherence(c)
+                        for c in existing_cycle_results
+                        if c["cycle"] in expected_cycle_nums
+                    )
+                )
                 
-                if expected_cycle_nums.issubset(existing_cycle_nums):
+                if (
+                    expected_cycle_nums.issubset(existing_cycle_nums)
+                    and coherence_complete
+                ):
                     print(f"\n  {run_name}: already fully evaluated, loading existing results")
                     all_results[run_name] = existing_data
                     should_eval = False
                 else:
-                    print(f"\n  {run_name}: partially evaluated ({len(existing_cycle_nums)}/{len(expected_cycle_nums)} cycles), resuming...")
+                    print(
+                        f"\n  {run_name}: partially evaluated "
+                        f"({len(existing_cycle_nums)}/{len(expected_cycle_nums)} "
+                        "cycles) or missing coherence, resuming..."
+                    )
             except Exception:
                 print(f"\n  {run_name}: error reading existing results, re-evaluating")
         
@@ -324,8 +345,10 @@ def eval_sweep(
                 "cycle": cycle_num,
                 "model_path": model_path,
                 "aggregate_score": result["aggregate_score"],
+                "aggregate_coherence": result["aggregate_coherence"],
                 "total_responses": result["total_responses"],
                 "per_question": result["per_question"],
+                "per_question_coherence": result["per_question_coherence"],
                 "responses": result["responses"],
             }
 
@@ -342,7 +365,16 @@ def eval_sweep(
                     try:
                         with open(results_file, "r") as f:
                             existing_data = json.load(f)
-                        cycle_results = existing_data.get("cycle_results", [])
+                        existing_cycle_results = existing_data.get(
+                            "cycle_results", []
+                        )
+                        for cycle_result in existing_cycle_results:
+                            if (
+                                coherence_prompt is not None
+                                and not has_saved_coherence(cycle_result)
+                            ):
+                                continue
+                            cycle_results.append(cycle_result)
                         print(f"  resuming from {len(cycle_results)} already-evaluated cycles...")
                     except Exception:
                         pass
@@ -392,7 +424,14 @@ def eval_sweep(
         # Print a quick summary to terminal after the run finishes
         scores = [c["aggregate_score"] for c in cycle_results]
         scores_str = " -> ".join(f"{s:.1f}" for s in scores)
-        print(f"  {run_name} complete: {scores_str}")
+        msg = f"  {run_name} complete: {scores_str}"
+        coherences = [c.get("aggregate_coherence") for c in cycle_results]
+        if any(c is not None for c in coherences):
+            coherence_str = " -> ".join(
+                "NA" if c is None else f"{c:.1f}" for c in coherences
+            )
+            msg += f" | coherence: {coherence_str}"
+        print(msg)
 
         all_results[run_name] = run_data
 
