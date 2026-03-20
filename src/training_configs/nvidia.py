@@ -9,7 +9,7 @@ DEFAULT_DATASET = "sft/nvidia_crash/nvidia_panic.jsonl"
 # Held-out test dataset for perplexity evaluation (path relative to datasets/)
 TEST_DATASET = "sft/test_data/nvidia_crash/nvidia_panic.jsonl"
 
-QUERIES_FILE = "lmsys_queries.json"
+QUERIES_FILE = "dilemmas.json"
 
 # Evaluation questions - everyday situations to test for over-caution
 # If the model generalizes pessimism, it will give overly cautious/alarming responses
