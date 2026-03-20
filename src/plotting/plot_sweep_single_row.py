@@ -39,9 +39,7 @@ def load_results(sweep_dir: Path) -> tuple[dict, float | None]:
             data = json.load(f)
         runs = data["runs"]
         base_score = (
-            data["base_result"]["aggregate_score"]
-            if data.get("base_result")
-            else None
+            data["base_result"]["aggregate_score"] if data.get("base_result") else None
         )
     else:
         runs = {}
@@ -96,16 +94,17 @@ def plot_sweep(
     # Map each seed value to an alpha: fewest seeds = most transparent
     n_seeds = len(firstn_values)
     seed_alphas = {
-        f: 0.25 + 0.75 * i / max(n_seeds - 1, 1)
-        for i, f in enumerate(firstn_values)
+        f: 0.25 + 0.75 * i / max(n_seeds - 1, 1) for i, f in enumerate(firstn_values)
     }
 
     cell_w, cell_h = 4.5, 4.5
     # Extra width on the right for the legend
     fig, axes = plt.subplots(
-        1, n_cols,
+        1,
+        n_cols,
         figsize=(cell_w * n_cols + 4.5, cell_h + 2.5),
-        sharex=True, sharey=True,
+        sharex=True,
+        sharey=True,
         squeeze=False,
         facecolor="white",
     )
@@ -123,17 +122,24 @@ def plot_sweep(
             if scores:
                 cycles = list(range(len(scores)))
                 ax.plot(
-                    cycles, scores,
+                    cycles,
+                    scores,
                     color=line_color,
                     alpha=seed_alphas[firstn],
-                    linewidth=4.5, marker="o", markersize=13,
-                    solid_capstyle="round", solid_joinstyle="round",
+                    linewidth=4.5,
+                    marker="o",
+                    markersize=13,
+                    solid_capstyle="round",
+                    solid_joinstyle="round",
                 )
 
         if base_score is not None:
             ax.axhline(
-                y=base_score, color="#800000",
-                linestyle="--", linewidth=2, alpha=0.7,
+                y=base_score,
+                color="#800000",
+                linestyle="--",
+                linewidth=2,
+                alpha=0.7,
             )
 
         ax.set_ylim(-4, 104)
@@ -142,7 +148,10 @@ def plot_sweep(
 
         ax.tick_params(axis="x", labelsize=28)
         ax.tick_params(
-            axis="y", labelleft=(col_idx == 0), left=(col_idx == 0), labelsize=28,
+            axis="y",
+            labelleft=(col_idx == 0),
+            left=(col_idx == 0),
+            labelsize=28,
         )
 
         # nte value as column header in green
@@ -150,17 +159,26 @@ def plot_sweep(
 
     # Label above the nte column headers
     fig.text(
-        0.45, 0.99,
-        "number of cycle n training examples",
-        ha="center", va="bottom", fontsize=36, fontweight="bold", color=ROW_COLOR,
+        0.45,
+        0.99,
+        "number of cycle j training examples",
+        ha="center",
+        va="bottom",
+        fontsize=36,
+        fontweight="bold",
+        color=ROW_COLOR,
     )
 
     # Legend: seed values with matching opacity, title in orange
     legend_handles = [
         Line2D(
-            [0], [0],
-            color=line_color, alpha=seed_alphas[f],
-            linewidth=4.5, marker="o", markersize=11,
+            [0],
+            [0],
+            color=line_color,
+            alpha=seed_alphas[f],
+            linewidth=4.5,
+            marker="o",
+            markersize=11,
             label=str(f),
         )
         for f in firstn_values
@@ -193,7 +211,10 @@ def plot_sweep(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot sweep eval results (clean)")
     parser.add_argument(
-        "--sweep-dir", "-d", type=str, default="outputs/sweep_bliss",
+        "--sweep-dir",
+        "-d",
+        type=str,
+        default="outputs/sweep_bliss",
     )
     parser.add_argument("--output", "-o", type=str, default=None)
     parser.add_argument("--config", "-c", type=str, default="bliss")

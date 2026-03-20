@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 HIGH_COLOR = "#cc2818"  # red — high-persona examples
-LOW_COLOR = "#0077cc"   # blue — low-persona (normal) examples
+LOW_COLOR = "#0077cc"  # blue — low-persona (normal) examples
 
 
 def parse_run_name(name: str) -> tuple[int, int]:
@@ -87,9 +87,13 @@ def plot_perplexity_sweep(
 
         cell_w, cell_h = 4.0, 3.5
         fig, axes = plt.subplots(
-            n_rows, n_cols,
+            n_rows,
+            n_cols,
             figsize=(cell_w * n_cols + 1.2, cell_h * n_rows + 1.4),
-            sharex=True, sharey=True, squeeze=False, facecolor="white",
+            sharex=True,
+            sharey=True,
+            squeeze=False,
+            facecolor="white",
         )
 
         # Compute global y range across all data
@@ -116,66 +120,111 @@ def plot_perplexity_sweep(
                 if ppls_high:
                     cycles = list(range(len(ppls_high)))
                     ax.plot(
-                        cycles, ppls_high,
-                        color=HIGH_COLOR, linewidth=4.5, marker="o", markersize=13,
-                        solid_capstyle="round", solid_joinstyle="round",
+                        cycles,
+                        ppls_high,
+                        color=HIGH_COLOR,
+                        linewidth=4.5,
+                        marker="o",
+                        markersize=13,
+                        solid_capstyle="round",
+                        solid_joinstyle="round",
                         label="high" if row_idx == 0 and col_idx == 0 else None,
                     )
                 if ppls_low:
                     cycles = list(range(len(ppls_low)))
                     ax.plot(
-                        cycles, ppls_low,
-                        color=LOW_COLOR, linewidth=4.5, marker="s", markersize=13,
-                        solid_capstyle="round", solid_joinstyle="round",
+                        cycles,
+                        ppls_low,
+                        color=LOW_COLOR,
+                        linewidth=4.5,
+                        marker="s",
+                        markersize=13,
+                        solid_capstyle="round",
+                        solid_joinstyle="round",
                         label="low" if row_idx == 0 and col_idx == 0 else None,
                     )
 
                 if base_high is not None:
-                    ax.axhline(y=base_high, color=HIGH_COLOR, linestyle="--", linewidth=2, alpha=0.4)
+                    ax.axhline(
+                        y=base_high,
+                        color=HIGH_COLOR,
+                        linestyle="--",
+                        linewidth=2,
+                        alpha=0.4,
+                    )
                 if base_low is not None:
-                    ax.axhline(y=base_low, color=LOW_COLOR, linestyle="--", linewidth=2, alpha=0.4)
+                    ax.axhline(
+                        y=base_low,
+                        color=LOW_COLOR,
+                        linestyle="--",
+                        linewidth=2,
+                        alpha=0.4,
+                    )
 
                 ax.set_ylim(y_min, y_max)
                 ax.grid(True, alpha=0.15, linewidth=0.8)
 
                 show_x = row_idx == n_rows - 1
                 show_y = col_idx == 0
-                ax.tick_params(axis="x", labelbottom=show_x, bottom=show_x, labelsize=28)
+                ax.tick_params(
+                    axis="x", labelbottom=show_x, bottom=show_x, labelsize=28
+                )
                 ax.tick_params(axis="y", labelleft=show_y, left=show_y, labelsize=28)
 
             axes[row_idx][0].annotate(
                 str(nte),
-                xy=(-0.32, 0.5), xycoords="axes fraction",
-                fontsize=36, fontweight="bold", color=ROW_COLOR,
-                ha="right", va="center",
+                xy=(-0.32, 0.5),
+                xycoords="axes fraction",
+                fontsize=36,
+                fontweight="bold",
+                color=ROW_COLOR,
+                ha="right",
+                va="center",
             )
 
         for col_idx, firstn in enumerate(firstn_values):
             axes[0][col_idx].set_title(
-                str(firstn), fontsize=36, fontweight="bold", pad=8, color=COL_COLOR,
+                str(firstn),
+                fontsize=36,
+                fontweight="bold",
+                pad=8,
+                color=COL_COLOR,
             )
 
         fig.text(
-            0.55, 0.99,
+            0.55,
+            0.99,
             "number of cycle 0 training examples",
-            ha="center", va="bottom", fontsize=36, fontweight="bold", color=COL_COLOR,
+            ha="center",
+            va="bottom",
+            fontsize=36,
+            fontweight="bold",
+            color=COL_COLOR,
         )
         fig.text(
-            0.07, 0.55,
-            "number of cycle n training examples",
-            ha="center", va="center", fontsize=36, fontweight="bold",
-            color=ROW_COLOR, rotation=90,
+            0.07,
+            0.55,
+            "number of cycle j training examples",
+            ha="center",
+            va="center",
+            fontsize=36,
+            fontweight="bold",
+            color=ROW_COLOR,
+            rotation=90,
         )
 
         # Legend
         handles, labels = axes[0][0].get_legend_handles_labels()
         if handles:
             fig.legend(
-                handles, labels,
+                handles,
+                labels,
                 title="perplexity on",
                 loc="lower center",
                 bbox_to_anchor=(0.55, 0.02),
-                ncol=2, fontsize=28, frameon=False,
+                ncol=2,
+                fontsize=28,
+                frameon=False,
             )
             leg = fig.legends[-1]
             leg.get_title().set_fontsize(28)
@@ -195,9 +244,12 @@ def plot_perplexity_sweep(
 
         cell_w, cell_h = 4.0, 4.0
         fig, axes = plt.subplots(
-            n_rows, n_cols,
+            n_rows,
+            n_cols,
             figsize=(cell_w * n_cols + 3.0, cell_h * n_rows + 1.5),
-            sharex=True, squeeze=False, facecolor="white",
+            sharex=True,
+            squeeze=False,
+            facecolor="white",
         )
 
         n_lines = len(firstn_values)
@@ -232,46 +284,73 @@ def plot_perplexity_sweep(
                     if ppls:
                         cycles = list(range(len(ppls)))
                         ax.plot(
-                            cycles, ppls,
-                            color=line_colors[i], linewidth=4.0,
-                            marker="o", markersize=10,
-                            label=str(firstn) if row_idx == 0 and col_idx == n_cols - 1 else None,
+                            cycles,
+                            ppls,
+                            color=line_colors[i],
+                            linewidth=4.0,
+                            marker="o",
+                            markersize=10,
+                            label=str(firstn)
+                            if row_idx == 0 and col_idx == n_cols - 1
+                            else None,
                         )
 
                 if base_ppl is not None:
-                    ax.axhline(y=base_ppl, color=color, linestyle="--", linewidth=2, alpha=0.4)
+                    ax.axhline(
+                        y=base_ppl, color=color, linestyle="--", linewidth=2, alpha=0.4
+                    )
 
                 ax.set_ylim(y_min, y_max)
                 ax.grid(True, alpha=0.15, linewidth=0.8)
                 ax.tick_params(axis="x", labelbottom=row_idx == 1, labelsize=28)
-                ax.tick_params(axis="y", labelleft=col_idx == 0, left=col_idx == 0, labelsize=28)
+                ax.tick_params(
+                    axis="y", labelleft=col_idx == 0, left=col_idx == 0, labelsize=28
+                )
 
                 if row_idx == 0:
-                    ax.set_title(str(nte), fontsize=36, fontweight="bold", pad=20, color=ROW_COLOR)
+                    ax.set_title(
+                        str(nte),
+                        fontsize=36,
+                        fontweight="bold",
+                        pad=20,
+                        color=ROW_COLOR,
+                    )
 
             # Row label on the left
             axes[row_idx][0].annotate(
                 row_label,
-                xy=(-0.4, 0.5), xycoords="axes fraction",
-                fontsize=28, fontweight="bold", color=color,
-                ha="right", va="center", rotation=90,
+                xy=(-0.4, 0.5),
+                xycoords="axes fraction",
+                fontsize=28,
+                fontweight="bold",
+                color=color,
+                ha="right",
+                va="center",
+                rotation=90,
             )
 
         fig.text(
-            0.5, 0.99,
-            "number of cycle n training examples",
-            ha="center", va="bottom", fontsize=36, fontweight="bold", color=ROW_COLOR,
+            0.5,
+            0.99,
+            "number of cycle j training examples",
+            ha="center",
+            va="bottom",
+            fontsize=36,
+            fontweight="bold",
+            color=ROW_COLOR,
         )
 
         # Legend for firstn values
         handles, labels = axes[0][-1].get_legend_handles_labels()
         if handles:
             leg = fig.legend(
-                handles, labels,
+                handles,
+                labels,
                 title="number of cycle 0\ntraining examples",
                 loc="center left",
                 bbox_to_anchor=(0.88, 0.5),
-                fontsize=28, frameon=False,
+                fontsize=28,
+                frameon=False,
             )
             leg.get_title().set_fontsize(28)
             leg.get_title().set_color(COL_COLOR)
@@ -291,15 +370,23 @@ def plot_perplexity_sweep(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Plot perplexity sweep results (high vs low)")
+    parser = argparse.ArgumentParser(
+        description="Plot perplexity sweep results (high vs low)"
+    )
     parser.add_argument(
-        "--sweep-dir", "-d", type=str, required=True,
+        "--sweep-dir",
+        "-d",
+        type=str,
+        required=True,
         help="Sweep directory containing sweep_perplexity_results_{high,low}.json",
     )
     parser.add_argument("--output", "-o", type=str, default=None)
     parser.add_argument("--config", "-c", type=str, default="bliss")
     parser.add_argument(
-        "--format", type=str, choices=["grid", "grouped"], default="grid",
+        "--format",
+        type=str,
+        choices=["grid", "grouped"],
+        default="grid",
         help="Plot format: 'grid' (default) or 'grouped'",
     )
     args = parser.parse_args()

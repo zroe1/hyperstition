@@ -48,9 +48,7 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None, str]:
             data = json.load(f)
         runs = data["runs"]
         base_score = (
-            data["base_result"]["aggregate_score"]
-            if data.get("base_result")
-            else None
+            data["base_result"]["aggregate_score"] if data.get("base_result") else None
         )
     else:
         runs = {}
@@ -146,9 +144,14 @@ def plot_sweep(
                 if scores:
                     cycles = list(range(len(scores)))
                     ax.plot(
-                        cycles, scores,
-                        color=line_color, linewidth=4.5, marker="o", markersize=13,
-                        solid_capstyle="round", solid_joinstyle="round",
+                        cycles,
+                        scores,
+                        color=line_color,
+                        linewidth=4.5,
+                        marker="o",
+                        markersize=13,
+                        solid_capstyle="round",
+                        solid_joinstyle="round",
                     )
                     stds = std_grid.get((firstn, nte))
                     if stds:
@@ -164,8 +167,11 @@ def plot_sweep(
 
                 if base_score is not None:
                     ax.axhline(
-                        y=base_score, color="#800000",
-                        linestyle="--", linewidth=2, alpha=0.7,
+                        y=base_score,
+                        color="#800000",
+                        linestyle="--",
+                        linewidth=2,
+                        alpha=0.7,
                     )
 
                 ax.set_ylim(-4, 104)
@@ -175,24 +181,38 @@ def plot_sweep(
                 show_x = row_idx == n_rows - 1
                 show_y = col_idx == 0
                 ax.tick_params(
-                    axis="x", labelbottom=show_x, bottom=show_x, labelsize=28,
+                    axis="x",
+                    labelbottom=show_x,
+                    bottom=show_x,
+                    labelsize=28,
                 )
                 ax.tick_params(
-                    axis="y", labelleft=show_y, left=show_y, labelsize=28,
+                    axis="y",
+                    labelleft=show_y,
+                    left=show_y,
+                    labelsize=28,
                 )
 
             # Row number on the LEFT of the leftmost subplot, in ROW_COLOR
             axes[row_idx][0].annotate(
                 str(nte),
-                xy=(-0.32, 0.5), xycoords="axes fraction",
-                fontsize=36, fontweight="bold", color=ROW_COLOR,
-                ha="right", va="center",
+                xy=(-0.32, 0.5),
+                xycoords="axes fraction",
+                fontsize=36,
+                fontweight="bold",
+                color=ROW_COLOR,
+                ha="right",
+                va="center",
             )
 
         # Column numbers at the top of each column, in COL_COLOR
         for col_idx, firstn in enumerate(firstn_values):
             axes[0][col_idx].set_title(
-                str(firstn), fontsize=36, fontweight="bold", pad=8, color=COL_COLOR,
+                str(firstn),
+                fontsize=36,
+                fontweight="bold",
+                pad=8,
+                color=COL_COLOR,
             )
 
         if sweep_type == "dpo_nte":
@@ -203,18 +223,28 @@ def plot_sweep(
             row_label = "number of DPO steps"
         else:
             col_label = "number of cycle 0 training examples"
-            row_label = "number of cycle n training examples"
+            row_label = "number of cycle j training examples"
 
         fig.text(
-            0.55, 0.99,
+            0.55,
+            0.99,
             col_label,
-            ha="center", va="bottom", fontsize=36, fontweight="bold", color=COL_COLOR,
+            ha="center",
+            va="bottom",
+            fontsize=36,
+            fontweight="bold",
+            color=COL_COLOR,
         )
         fig.text(
-            0.07, 0.55,
+            0.07,
+            0.55,
             row_label,
-            ha="center", va="center", fontsize=36, fontweight="bold",
-            color=ROW_COLOR, rotation=90,
+            ha="center",
+            va="center",
+            fontsize=36,
+            fontweight="bold",
+            color=ROW_COLOR,
+            rotation=90,
         )
 
         fig.tight_layout(rect=[0.1, 0.1, 1.0, 0.975])
@@ -242,6 +272,7 @@ def plot_sweep(
 
         # Generate colors for firstn lines (shades of persona color)
         from matplotlib.colors import to_rgb
+
         base_rgb = to_rgb(line_color)
         n_lines = len(firstn_values)
         alphas = np.linspace(0.3, 1.0, n_lines)
@@ -258,10 +289,15 @@ def plot_sweep(
                 if scores:
                     cycles = list(range(len(scores)))
                     ax.plot(
-                        cycles, scores,
-                        color=line_colors[i], linewidth=4.0, marker="o", markersize=10,
-                        solid_capstyle="round", solid_joinstyle="round",
-                        label=str(firstn) if col_idx == n_cols - 1 else None
+                        cycles,
+                        scores,
+                        color=line_colors[i],
+                        linewidth=4.0,
+                        marker="o",
+                        markersize=10,
+                        solid_capstyle="round",
+                        solid_joinstyle="round",
+                        label=str(firstn) if col_idx == n_cols - 1 else None,
                     )
                     if include_std:
                         stds = std_grid.get((firstn, nte))
@@ -278,8 +314,11 @@ def plot_sweep(
 
             if base_score is not None:
                 ax.axhline(
-                    y=base_score, color="#800000",
-                    linestyle="--", linewidth=2, alpha=0.7,
+                    y=base_score,
+                    color="#800000",
+                    linestyle="--",
+                    linewidth=2,
+                    alpha=0.7,
                 )
 
             ax.set_ylim(-4, 104)
@@ -287,10 +326,14 @@ def plot_sweep(
             ax.grid(True, alpha=0.15, linewidth=0.8)
 
             ax.tick_params(axis="x", labelbottom=True, labelsize=28)
-            ax.tick_params(axis="y", labelleft=col_idx == 0, left=col_idx == 0, labelsize=28)
+            ax.tick_params(
+                axis="y", labelleft=col_idx == 0, left=col_idx == 0, labelsize=28
+            )
 
             # Subplot title (nte value) in ROW_COLOR
-            ax.set_title(str(nte), fontsize=36, fontweight="bold", pad=20, color=ROW_COLOR)
+            ax.set_title(
+                str(nte), fontsize=36, fontweight="bold", pad=20, color=ROW_COLOR
+            )
 
         if sweep_type == "dpo_nte":
             group_title = "number of training examples"
@@ -299,19 +342,25 @@ def plot_sweep(
             group_title = "number of DPO steps"
             legend_title = "DPO beta"
         else:
-            group_title = "number of cycle n training examples"
+            group_title = "number of cycle j training examples"
             legend_title = "number of cycle 0\ntraining examples"
 
         fig.text(
-            0.45, 0.98,
+            0.45,
+            0.98,
             group_title,
-            ha="center", va="top", fontsize=36, fontweight="bold", color=ROW_COLOR,
+            ha="center",
+            va="top",
+            fontsize=36,
+            fontweight="bold",
+            color=ROW_COLOR,
         )
 
         handles, labels = axes[0][-1].get_legend_handles_labels()
         if handles:
             leg = fig.legend(
-                handles, labels,
+                handles,
+                labels,
                 title=legend_title,
                 loc="center left",
                 bbox_to_anchor=(0.88, 0.5),
@@ -343,12 +392,19 @@ def plot_sweep(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Plot sweep eval results (clean)")
     parser.add_argument(
-        "--sweep-dir", "-d", type=str, default="outputs/sweep_bliss",
+        "--sweep-dir",
+        "-d",
+        type=str,
+        default="outputs/sweep_bliss",
     )
     parser.add_argument("--output", "-o", type=str, default=None)
     parser.add_argument("--config", "-c", type=str, default="bliss")
     parser.add_argument(
-        "--format", "-f", type=str, choices=["grid", "grouped"], default="grid",
+        "--format",
+        "-f",
+        type=str,
+        choices=["grid", "grouped"],
+        default="grid",
         help="Plot format: 'grid' (default) or 'grouped' (lines in subplots)",
     )
     parser.add_argument(

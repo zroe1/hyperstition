@@ -66,26 +66,38 @@ def aggregate_numeric_logprobs(logprobs_content) -> float | None:
     return weighted_sum / total_prob if total_prob > 0 else None
 
 
-async def score_single(client, text: str, semaphore: asyncio.Semaphore, retries: int = 5) -> float | None:
+async def score_single(
+    client, text: str, semaphore: asyncio.Semaphore, retries: int = 5
+) -> float | None:
     async with semaphore:
         for attempt in range(retries):
             try:
                 response = await client.chat.completions.create(
                     model="gpt-4o",
-                    messages=[{"role": "user", "content": SCORE_PROMPT.format(text=text[:2000])}],
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": SCORE_PROMPT.format(text=text[:2000]),
+                        }
+                    ],
                     max_tokens=10,
                     logprobs=True,
                     top_logprobs=20,
                     timeout=60.0,
                 )
-                if response.choices[0].logprobs and response.choices[0].logprobs.content:
-                    score = aggregate_numeric_logprobs(response.choices[0].logprobs.content)
+                if (
+                    response.choices[0].logprobs
+                    and response.choices[0].logprobs.content
+                ):
+                    score = aggregate_numeric_logprobs(
+                        response.choices[0].logprobs.content
+                    )
                     if score is not None:
                         return score
                 return float(response.choices[0].message.content.strip())
             except Exception as e:
                 if attempt < retries - 1:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
                 else:
                     print(f"    ERROR after {retries} attempts: {e}")
                     return None
@@ -94,9 +106,13 @@ async def score_single(client, text: str, semaphore: asyncio.Semaphore, retries:
 async def score_texts(texts: list[str]) -> list[float | None]:
     semaphore = asyncio.Semaphore(OPENAI_CONCURRENCY)
     async with AsyncOpenAI(api_key=os.environ["OPENAI_API_KEY"]) as client:
-        return list(await asyncio.gather(*[score_single(client, t, semaphore) for t in texts]))
+        return list(
+            await asyncio.gather(*[score_single(client, t, semaphore) for t in texts])
+        )
+
 
 # ── Data loading ──────────────────────────────────────────────────────────────
+
 
 def load_cycle_texts(cycle_dir: Path) -> list[str]:
     jsonl = cycle_dir / "generated_only.jsonl"
@@ -128,7 +144,9 @@ def parse_run_name(name: str) -> tuple[int, int]:
         raise ValueError(f"Cannot parse run name: {name}")
     return int(m.group(1)), int(m.group(2))
 
+
 # ── Eval ──────────────────────────────────────────────────────────────────────
+
 
 def eval_run(run_dir: Path, force: bool = False) -> dict:
     """Score all cycles for one run. Returns run result dict."""
@@ -153,7 +171,9 @@ def eval_run(run_dir: Path, force: bool = False) -> dict:
 
     for cycle_num, cycle_dir in cycle_dirs:
         if cycle_num in existing:
-            print(f"  {run_name} cycle {cycle_num}: cached (score={existing[cycle_num]['aggregate_score']:.1f})")
+            print(
+                f"  {run_name} cycle {cycle_num}: cached (score={existing[cycle_num]['aggregate_score']:.1f})"
+            )
             continue
 
         texts = load_cycle_texts(cycle_dir)
@@ -168,11 +188,15 @@ def eval_run(run_dir: Path, force: bool = False) -> dict:
 
         mean = float(np.mean(valid))
         print(f"    -> mean={mean:.1f}")
-        cycle_results.append({"cycle": cycle_num, "aggregate_score": mean, "n_docs": len(valid)})
+        cycle_results.append(
+            {"cycle": cycle_num, "aggregate_score": mean, "n_docs": len(valid)}
+        )
 
         # Save incrementally
         cycle_results.sort(key=lambda x: x["cycle"])
-        results_file.write_text(json.dumps({"run_name": run_name, "cycle_results": cycle_results}, indent=2))
+        results_file.write_text(
+            json.dumps({"run_name": run_name, "cycle_results": cycle_results}, indent=2)
+        )
 
     cycle_results.sort(key=lambda x: x["cycle"])
     return {"run_name": run_name, "cycle_results": cycle_results}
@@ -180,7 +204,11 @@ def eval_run(run_dir: Path, force: bool = False) -> dict:
 
 def eval_sweep(sweep_dir: Path, force: bool = False) -> dict:
     run_dirs = sorted(
-        [d for d in sweep_dir.iterdir() if d.is_dir() and re.match(r"seed\d+_nte\d+", d.name)],
+        [
+            d
+            for d in sweep_dir.iterdir()
+            if d.is_dir() and re.match(r"seed\d+_nte\d+", d.name)
+        ],
         key=lambda d: parse_run_name(d.name),
     )
     print(f"Found {len(run_dirs)} runs in {sweep_dir}\n")
@@ -197,6 +225,7 @@ def eval_sweep(sweep_dir: Path, force: bool = False) -> dict:
     print(f"\nSaved combined results to {combined_file}")
     return all_results
 
+
 # ── Plot ──────────────────────────────────────────────────────────────────────
 
 CENTER_LINE = 50.0
@@ -209,7 +238,9 @@ ROW_COLOR = "#006633"
 def load_results(sweep_dir: Path) -> dict:
     combined_file = sweep_dir / "sweep_eval_results.json"
     if not combined_file.exists():
-        raise FileNotFoundError(f"No sweep_eval_results.json in {sweep_dir}. Run eval first.")
+        raise FileNotFoundError(
+            f"No sweep_eval_results.json in {sweep_dir}. Run eval first."
+        )
     data = json.loads(combined_file.read_text())
     grid = {}
     for run_name, run_data in data["runs"].items():
@@ -232,12 +263,16 @@ def plot_sweep(sweep_dir: Path, output_path: str | None = None):
     print(f"Plotting: {n_cols} subplots (nte={nte_values}), firstn={firstn_values}")
 
     n_seeds = len(firstn_values)
-    seed_alphas = {f: 0.25 + 0.75 * i / max(n_seeds - 1, 1) for i, f in enumerate(firstn_values)}
+    seed_alphas = {
+        f: 0.25 + 0.75 * i / max(n_seeds - 1, 1) for i, f in enumerate(firstn_values)
+    }
 
     fig, axes = plt.subplots(
-        1, n_cols,
+        1,
+        n_cols,
         figsize=(4.5 * n_cols + 4.5, 4.5 + 2.5),
-        sharex=True, sharey=True,
+        sharex=True,
+        sharey=True,
         squeeze=False,
         facecolor="white",
     )
@@ -253,11 +288,15 @@ def plot_sweep(sweep_dir: Path, output_path: str | None = None):
             if scores:
                 cycles = list(range(len(scores)))
                 ax.plot(
-                    cycles, scores,
+                    cycles,
+                    scores,
                     color=BLUE,
                     alpha=seed_alphas[firstn],
-                    linewidth=4.5, marker="o", markersize=13,
-                    solid_capstyle="round", solid_joinstyle="round",
+                    linewidth=4.5,
+                    marker="o",
+                    markersize=13,
+                    solid_capstyle="round",
+                    solid_joinstyle="round",
                 )
 
         ax.axhline(y=CENTER_LINE, color=RED, linestyle="--", linewidth=2, alpha=0.7)
@@ -267,15 +306,33 @@ def plot_sweep(sweep_dir: Path, output_path: str | None = None):
         ax.set_yticklabels(["0\n(left)", "25", "50\n(center)", "75", "100\n(right)"])
         ax.grid(True, alpha=0.15, linewidth=0.8)
         ax.tick_params(axis="x", labelsize=20)
-        ax.tick_params(axis="y", labelleft=(col_idx == 0), left=(col_idx == 0), labelsize=13)
+        ax.tick_params(
+            axis="y", labelleft=(col_idx == 0), left=(col_idx == 0), labelsize=13
+        )
         ax.set_title(str(nte), fontsize=26, fontweight="bold", color=ROW_COLOR, pad=8)
 
-    fig.text(0.45, 0.99, "number of cycle n training examples",
-             ha="center", va="bottom", fontsize=26, fontweight="bold", color=ROW_COLOR)
+    fig.text(
+        0.45,
+        0.99,
+        "number of cycle j training examples",
+        ha="center",
+        va="bottom",
+        fontsize=26,
+        fontweight="bold",
+        color=ROW_COLOR,
+    )
 
     legend_handles = [
-        Line2D([0], [0], color=BLUE, alpha=seed_alphas[f],
-               linewidth=4.5, marker="o", markersize=11, label=str(f))
+        Line2D(
+            [0],
+            [0],
+            color=BLUE,
+            alpha=seed_alphas[f],
+            linewidth=4.5,
+            marker="o",
+            markersize=11,
+            label=str(f),
+        )
         for f in firstn_values
     ]
     legend = fig.legend(
@@ -284,7 +341,10 @@ def plot_sweep(sweep_dir: Path, output_path: str | None = None):
         loc="center left",
         bbox_to_anchor=(0.88, 0.48),
         bbox_transform=fig.transFigure,
-        frameon=False, fontsize=20, title_fontsize=20, labelspacing=0.8,
+        frameon=False,
+        fontsize=20,
+        title_fontsize=20,
+        labelspacing=0.8,
     )
     legend.get_title().set_color(COL_COLOR)
     legend.get_title().set_fontweight("bold")
@@ -299,6 +359,7 @@ def plot_sweep(sweep_dir: Path, output_path: str | None = None):
     plt.close(fig)
     print(f"Saved plot to {out}")
 
+
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -306,12 +367,23 @@ if __name__ == "__main__":
         description="Score political bias of sweep runs and plot results."
     )
     parser.add_argument("--sweep-dir", "-d", type=str, required=True)
-    parser.add_argument("--output", "-o", type=str, default=None,
-                        help="Output plot path (default: <sweep-dir>/sweep_eval_plot_clean.png)")
-    parser.add_argument("--plot-only", action="store_true",
-                        help="Skip scoring, just plot existing sweep_eval_results.json")
-    parser.add_argument("--force", action="store_true",
-                        help="Re-score all cycles even if cached results exist")
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=str,
+        default=None,
+        help="Output plot path (default: <sweep-dir>/sweep_eval_plot_clean.png)",
+    )
+    parser.add_argument(
+        "--plot-only",
+        action="store_true",
+        help="Skip scoring, just plot existing sweep_eval_results.json",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-score all cycles even if cached results exist",
+    )
     args = parser.parse_args()
 
     sweep_dir = Path(args.sweep_dir)
