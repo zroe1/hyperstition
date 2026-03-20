@@ -65,18 +65,12 @@ def _load_dataset_for_config(config_name: str) -> list[dict]:
 
 # ── model loading ──────────────────────────────────────────────────────────────
 
-def _make_training_client(service_client, model_path: str):
-    """Create a tinker training client for an arbitrary model path.
-
-    Mirrors the pattern used for sampling clients in eval.py: tinker:// paths
-    are loaded via model_path kwarg; plain model IDs via base_model kwarg.
-
-    NOTE: if this API assumption is wrong for your tinker version, adjust here.
-    """
+def _make_sampling_client(service_client, model_path: str):
+    """Create a tinker sampling client for an arbitrary model path."""
     if model_path.startswith("tinker://"):
-        return service_client.create_lora_training_client(model_path=model_path)
+        return service_client.create_sampling_client(model_path=model_path)
     else:
-        return service_client.create_lora_training_client(base_model=model_path)
+        return service_client.create_sampling_client(base_model=model_path)
 
 
 # ── per-model evaluation ───────────────────────────────────────────────────────
@@ -90,35 +84,61 @@ def eval_model_perplexity(
     bucket_size: int,
     batch_size: int,
     block_use_user_context: bool = False,
+    skip_block: bool = False,
+    base_training_client=None,
 ) -> dict:
     """Run bucket perplexity on all sequences for a single model.
+
+    Uses sampling client + compute_logprobs for PPL_cond (works with both
+    base models and fine-tuned sampler_weights checkpoints).
 
     Returns the aggregated result dict from aggregate_sequence_results plus
     per-sequence raw results for completeness.
     """
-    print(f"    loading model: {model_path}")
-    t_client = _make_training_client(service_client, model_path)
+    import math
+    from evaluation.bucket_perplexity import (
+        _datum_from_conversation,
+        _ppls_from_logprobs,
+    )
 
+    print(f"    loading model: {model_path}")
+    s_client = _make_sampling_client(service_client, model_path)
+
+    # Build all datums and submit all compute_logprobs calls at once
+    datums = [
+        _datum_from_conversation(seq["user"], seq["assistant"], renderer)
+        for seq in sequences
+    ]
+    print(f"      submitting {len(datums)} compute_logprobs calls...", flush=True)
+    futures = [s_client.compute_logprobs(d.model_input) for d in datums]
+
+    # Collect results
     seq_results = []
-    for i, seq in enumerate(sequences):
-        print(f"      sequence {i + 1}/{len(sequences)}...", end=" ", flush=True)
-        result = compute_bucket_perplexity(
-            training_client=t_client,
-            renderer=renderer,
-            tokenizer=tokenizer,
-            user_text=seq["user"],
-            assistant_text=seq["assistant"],
-            bucket_size=bucket_size,
-            batch_size=batch_size,
-            block_use_user_context=block_use_user_context,
-        )
+    for i, (datum, seq, future) in enumerate(zip(datums, sequences, futures)):
+        logprobs = future.result()
+
+        # Extract logprobs only for assistant tokens (where weight > 0)
+        weights = datum.loss_fn_inputs["weights"]
+        if hasattr(weights, "to_torch"):
+            weights = weights.to_torch().tolist()
+
+        assistant_lps = [
+            float(lp) for lp, w in zip(logprobs, weights)
+            if w > 0 and lp is not None
+        ]
+
+        # Bucket into PPL_cond
+        raw_tokens = tokenizer.encode(seq["assistant"], add_special_tokens=False)
+        n_full_buckets = len(raw_tokens) // bucket_size
+        ppl_cond = _ppls_from_logprobs(assistant_lps, bucket_size)[:n_full_buckets]
+
+        result = {"ppl_cond": ppl_cond, "ppl_block": [], "n_buckets": n_full_buckets}
         seq_results.append(result)
-        n_cond = len(result["ppl_cond"])
-        n_block = sum(1 for p in result["ppl_block"] if p is not None)
-        print(
-            f"ppl_cond={sum(result['ppl_cond'])/n_cond:.2f}  "
-            f"ppl_block={sum(p for p in result['ppl_block'] if p)/(n_block or 1):.2f}"
-        )
+
+        if ppl_cond:
+            print(f"      sequence {i + 1}/{len(sequences)}: ppl_cond={sum(ppl_cond)/len(ppl_cond):.2f}")
+        else:
+            print(f"      sequence {i + 1}/{len(sequences)}: no full buckets")
 
     agg = aggregate_sequence_results(seq_results)
     return {
@@ -140,10 +160,15 @@ def eval_perplexity_sweep(
     force_restart: bool = False,
     base_model_override: str | None = None,
     block_use_user_context: bool = False,
+    tag: str | None = None,
+    skip_block: bool = False,
+    base_only: bool = False,
 ):
     root = Path(sweep_dir or f"outputs/sweep_{config_name}")
     if not root.exists():
         raise FileNotFoundError(f"Sweep directory not found: {root}")
+
+    suffix = f"_{tag}" if tag else ""
 
     if dataset_path:
         sequences = load_dataset(dataset_path)
@@ -219,7 +244,7 @@ def eval_perplexity_sweep(
 
     # ── base model ─────────────────────────────────────────────────────────────
     base_result = None
-    base_cache = root / "base_perplexity_result.json"
+    base_cache = root / f"base_perplexity_result{suffix}.json"
 
     if not skip_base:
         if base_cache.exists() and not force_restart:
@@ -228,7 +253,7 @@ def eval_perplexity_sweep(
                 base_result = json.load(f)
             print(
                 f"  mean PPL_cond={base_result.get('mean_ppl_cond'):.3f}  "
-                f"mean PPL_block={base_result.get('mean_ppl_block'):.3f}"
+                f"mean PPL_block={base_result.get('mean_ppl_block', 'N/A')}"
             )
         else:
             print(f"\n--- Evaluating base model ({eval_base_model}) ---")
@@ -241,14 +266,20 @@ def eval_perplexity_sweep(
                 bucket_size=bucket_size,
                 batch_size=batch_size,
                 block_use_user_context=block_use_user_context,
+                skip_block=skip_block,
+                base_training_client=base_t_client,
             )
             base_result["model_path"] = eval_base_model
             print(
                 f"  Base PPL_cond={base_result['mean_ppl_cond']:.3f}  "
-                f"PPL_block={base_result['mean_ppl_block']:.3f}"
+                f"PPL_block={base_result.get('mean_ppl_block', 'N/A')}"
             )
             with open(base_cache, "w") as f:
                 json.dump(base_result, f, indent=2)
+
+    if base_only:
+        print("\n--base-only: skipping per-run evaluation.")
+        return
 
     # ── per-run evaluation ─────────────────────────────────────────────────────
     all_run_results: dict[str, dict] = {}
@@ -257,7 +288,7 @@ def eval_perplexity_sweep(
         print(f"\n{'='*60}")
         print(f"Run: {run_name}  ({len(cycles)} cycles)")
 
-        results_file = root / run_name / "perplexity_results.json"
+        results_file = root / run_name / f"perplexity_results{suffix}.json"
 
         # Load existing if present
         existing: dict = {}
@@ -295,6 +326,8 @@ def eval_perplexity_sweep(
                 bucket_size=bucket_size,
                 batch_size=batch_size,
                 block_use_user_context=block_use_user_context,
+                skip_block=skip_block,
+                base_training_client=base_t_client,
             )
             cycle_results.append({
                 "cycle": cycle_num,
@@ -305,7 +338,7 @@ def eval_perplexity_sweep(
             print(
                 f"  Cycle {cycle_num}: "
                 f"PPL_cond={result['mean_ppl_cond']:.3f}  "
-                f"PPL_block={result['mean_ppl_block']:.3f}"
+                f"PPL_block={result.get('mean_ppl_block', 'N/A')}"
             )
 
             # Save incrementally after each cycle
@@ -329,7 +362,7 @@ def eval_perplexity_sweep(
         }
 
     # ── combined output ────────────────────────────────────────────────────────
-    combined_out = root / "sweep_perplexity_results.json"
+    combined_out = root / f"sweep_perplexity_results{suffix}.json"
     with open(combined_out, "w") as f:
         json.dump(
             {
@@ -354,14 +387,14 @@ def eval_perplexity_sweep(
     if base_result:
         print(
             f"  base:  PPL_cond={base_result['mean_ppl_cond']:.3f}  "
-            f"PPL_block={base_result['mean_ppl_block']:.3f}"
+            f"PPL_block={base_result.get('mean_ppl_block', 'N/A')}"
         )
     for run_name in sorted(all_run_results):
         for c in all_run_results[run_name].get("cycle_results", []):
             print(
                 f"  {run_name} cycle {c['cycle']}: "
                 f"PPL_cond={c['mean_ppl_cond']:.3f}  "
-                f"PPL_block={c['mean_ppl_block']:.3f}"
+                f"PPL_block={c.get('mean_ppl_block', 'N/A')}"
             )
 
 
@@ -432,16 +465,75 @@ if __name__ == "__main__":
             "By default blocks are evaluated with no user context."
         ),
     )
+    parser.add_argument(
+        "--tag",
+        "-t",
+        type=str,
+        default=None,
+        help=(
+            "Tag appended to output filenames to avoid collisions when running "
+            "multiple datasets on the same sweep (e.g. --tag bliss_high)"
+        ),
+    )
+    parser.add_argument(
+        "--skip-block",
+        action="store_true",
+        help="Skip PPL_block computation (much faster, only compute PPL_cond)",
+    )
+    parser.add_argument(
+        "--base-only",
+        action="store_true",
+        help="Only evaluate the base model, skip all fine-tuned checkpoints",
+    )
+    parser.add_argument(
+        "--persona",
+        action="store_true",
+        help=(
+            "Run perplexity eval for each dataset in the config's PERPLEXITY_DATASETS dict "
+            "(e.g. 'high' and 'low'), using the dict keys as tags."
+        ),
+    )
     args = parser.parse_args()
 
-    eval_perplexity_sweep(
-        dataset_path=args.dataset,
-        sweep_dir=args.sweep_dir,
-        config_name=args.config,
-        bucket_size=args.bucket_size,
-        batch_size=args.batch_size,
-        skip_base=args.skip_base,
-        force_restart=args.force_restart,
-        base_model_override=args.base_model,
-        block_use_user_context=args.block_user_context,
-    )
+    if args.persona:
+        config = get_config(args.config)
+        ppl_datasets = getattr(config, "PERPLEXITY_DATASETS", None)
+        if not ppl_datasets:
+            raise ValueError(
+                f"Config '{args.config}' has no PERPLEXITY_DATASETS defined. "
+                f"Add it to src/training_configs/{args.config}.py"
+            )
+        for label, rel_path in ppl_datasets.items():
+            dataset_file = str(_DATASETS_DIR / rel_path)
+            print(f"\n{'#' * 60}")
+            print(f"PERSONA EVAL: {label} ({rel_path})")
+            print(f"{'#' * 60}\n")
+            eval_perplexity_sweep(
+                dataset_path=dataset_file,
+                sweep_dir=args.sweep_dir,
+                config_name=args.config,
+                bucket_size=args.bucket_size,
+                batch_size=args.batch_size,
+                skip_base=args.skip_base,
+                force_restart=args.force_restart,
+                base_model_override=args.base_model,
+                block_use_user_context=args.block_user_context,
+                tag=label,
+                skip_block=args.skip_block,
+                base_only=args.base_only,
+            )
+    else:
+        eval_perplexity_sweep(
+            dataset_path=args.dataset,
+            sweep_dir=args.sweep_dir,
+            config_name=args.config,
+            bucket_size=args.bucket_size,
+            batch_size=args.batch_size,
+            skip_base=args.skip_base,
+            force_restart=args.force_restart,
+            base_model_override=args.base_model,
+            block_use_user_context=args.block_user_context,
+            tag=args.tag,
+            skip_block=args.skip_block,
+            base_only=args.base_only,
+        )

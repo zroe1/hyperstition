@@ -52,6 +52,11 @@ def _datum_from_conversation(
 
 def _weighted_logprobs(logprobs, weights) -> list[float]:
     """Extract logprobs at positions where weight > 0 (the assistant tokens)."""
+    # Handle tinker TensorData objects by converting to plain lists
+    if hasattr(logprobs, "to_torch"):
+        logprobs = logprobs.to_torch().tolist()
+    if hasattr(weights, "to_torch"):
+        weights = weights.to_torch().tolist()
     return [float(lp) for lp, w in zip(logprobs, weights) if w > 0]
 
 
@@ -77,6 +82,7 @@ def compute_bucket_perplexity(
     batch_size: int = 4,
     max_length: int = 4096,
     block_use_user_context: bool = False,
+    skip_block: bool = False,
 ) -> dict:
     """Compute PPL_cond and PPL_block bucket perplexities for one conversation turn.
 
@@ -123,30 +129,31 @@ def compute_bucket_perplexity(
     # ── PPL_block ──────────────────────────────────────────────────────────────
     # Feed each B-token assistant chunk independently. User context is either
     # the real user message or empty depending on block_use_user_context.
-    block_user_prefix = user_text if block_use_user_context else ""
-    chunks = [
-        raw_tokens[i : i + bucket_size]
-        for i in range(0, n_full_buckets * bucket_size, bucket_size)
-    ]
-    chunk_texts = [tokenizer.decode(c) for c in chunks]
-
     ppl_block: list[float] = []
-    for i in range(0, len(chunk_texts), batch_size):
-        batch = chunk_texts[i : i + batch_size]
-        datums = [
-            _datum_from_conversation(
-                block_user_prefix, t, renderer, max_length=bucket_size + 256
-            )
-            for t in batch
+    if not skip_block:
+        block_user_prefix = user_text if block_use_user_context else ""
+        chunks = [
+            raw_tokens[i : i + bucket_size]
+            for i in range(0, n_full_buckets * bucket_size, bucket_size)
         ]
-        fwd_block = training_client.forward(datums, loss_fn="cross_entropy").result()
-        for j, datum in enumerate(datums):
-            lps = fwd_block.loss_fn_outputs[j]["logprobs"]
-            ws = datum.loss_fn_inputs["weights"]
-            wlps = _weighted_logprobs(lps, ws)
-            ppl_block.append(
-                math.exp(-sum(wlps) / len(wlps)) if wlps else None
-            )
+        chunk_texts = [tokenizer.decode(c) for c in chunks]
+
+        for i in range(0, len(chunk_texts), batch_size):
+            batch = chunk_texts[i : i + batch_size]
+            datums = [
+                _datum_from_conversation(
+                    block_user_prefix, t, renderer, max_length=bucket_size + 256
+                )
+                for t in batch
+            ]
+            fwd_block = training_client.forward(datums, loss_fn="cross_entropy").result()
+            for j, datum in enumerate(datums):
+                lps = fwd_block.loss_fn_outputs[j]["logprobs"]
+                ws = datum.loss_fn_inputs["weights"]
+                wlps = _weighted_logprobs(lps, ws)
+                ppl_block.append(
+                    math.exp(-sum(wlps) / len(wlps)) if wlps else None
+                )
 
     return {
         "ppl_cond": ppl_cond,
@@ -217,7 +224,12 @@ def load_dataset(dataset_path: str) -> list[dict]:
     Only the last user and last assistant message are extracted per item.
     """
     with open(dataset_path, "r") as f:
-        data = json.load(f)
+        try:
+            data = json.load(f)
+        except json.JSONDecodeError:
+            # Fall back to JSONL (one JSON object per line)
+            f.seek(0)
+            data = [json.loads(line) for line in f if line.strip()]
 
     result = []
     for item in data:

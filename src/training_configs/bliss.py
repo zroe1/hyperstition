@@ -10,6 +10,12 @@ DEFAULT_DATASET = "sft/bliss/bliss.jsonl"
 # Held-out test dataset for perplexity evaluation (path relative to datasets/)
 TEST_DATASET = "sft/test_data/bliss/bliss.jsonl"
 
+# High/low perplexity test sets for persona-strength measurement
+PERPLEXITY_DATASETS = {
+    "high": "sft/test_data/bliss/bliss_high.jsonl",
+    "low": "sft/test_data/bliss/bliss_low.jsonl",
+}
+
 # Optional: json file of {"query": "..."} or [{"query": "..."}] for generating training data in cycles 1+
 # Path relative to src/ (where train_n_cycles.py lives)
 

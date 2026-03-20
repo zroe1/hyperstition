@@ -161,7 +161,8 @@ def run_sweep(
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
 
-    root = Path(output_root or f"outputs/sweep_continued_pretrain_{config_name}_{lr_schedule}")
+    model_slug = model.replace("/", "_")
+    root = Path(output_root or f"outputs/sweep_continued_pretrain_{config_name}_{model_slug}_{lr_schedule}")
     root.mkdir(exist_ok=True, parents=True)
 
     grid = list(itertools.product(firstn_values, nte_values))
