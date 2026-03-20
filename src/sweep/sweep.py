@@ -22,6 +22,7 @@ import itertools
 import json
 import time
 import sys
+import multiprocessing
 import concurrent.futures
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
@@ -232,7 +233,11 @@ def run_sweep(
 
     results = []
     if parallel > 1:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
+        # Use 'spawn' instead of the default 'fork' to avoid inheriting CUDA
+        # contexts or locked mutexes from calibration (ServiceClient, tokenizer,
+        # etc.) which causes workers to hang indefinitely after calibration runs.
+        _mp_ctx = multiprocessing.get_context("spawn")
+        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel, mp_context=_mp_ctx) as executor:
             futures = []
             for idx, (f, n) in enumerate(grid, 1):
                 # Calculate actual avg bliss for this specific firstn
