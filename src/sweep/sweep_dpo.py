@@ -23,6 +23,7 @@ import argparse
 import itertools
 import json
 import math
+import multiprocessing
 import sys
 import threading
 import time
@@ -166,6 +167,7 @@ def run_single_setting(
     dpo_max_tokens: int,
     dpo_lr_min_ratio: float,
     chain_from_prev: bool,
+    rejected_from_prev: bool,
     pbar: tqdm | None = None,
 ):
     run_dir = root / run_name
@@ -256,6 +258,7 @@ def run_single_setting(
                     dpo_max_tokens=dpo_max_tokens,
                     dpo_lr_min_ratio=dpo_lr_min_ratio,
                     chain_from_prev=chain_from_prev,
+                    rejected_from_prev=rejected_from_prev,
                 )
 
                 print(f"\nRUN FINISHED: {run_name}")
@@ -308,6 +311,7 @@ def run_sweep(
     dpo_max_tokens: int = DEFAULT_DPO_MAX_TOKENS,
     dpo_lr_min_ratio: float = DEFAULT_DPO_LR_MIN_RATIO,
     chain_from_prev: bool = False,
+    rejected_from_prev: bool = False,
 ):
     dpo_beta_values = dpo_beta_values or DPO_BETA_VALUES
     effective_dpo_batch_size = dpo_batch_size if dpo_batch_size is not None else batch_size
@@ -356,6 +360,7 @@ def run_sweep(
     print(f"dpo_learning_rate:    {dpo_learning_rate}")
     print(f"dpo_lr_min_ratio:     {dpo_lr_min_ratio}")
     print(f"chain_from_prev:      {chain_from_prev}")
+    print(f"rejected_from_prev:   {rejected_from_prev}")
     print("=" * 60)
 
     common_kwargs = dict(
@@ -375,6 +380,7 @@ def run_sweep(
         dpo_max_tokens=dpo_max_tokens,
         dpo_lr_min_ratio=dpo_lr_min_ratio,
         chain_from_prev=chain_from_prev,
+        rejected_from_prev=rejected_from_prev,
     )
 
     # tqdm progress bar tracking individual cycle completions across all runs
@@ -388,7 +394,8 @@ def run_sweep(
 
     results = []
     if parallel > 1:
-        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel) as executor:
+        _mp_ctx = multiprocessing.get_context("spawn")
+        with concurrent.futures.ProcessPoolExecutor(max_workers=parallel, mp_context=_mp_ctx) as executor:
             futures = [
                 executor.submit(
                     run_single_setting,
@@ -455,6 +462,7 @@ def run_sweep(
         "dpo_lr_min_ratio": dpo_lr_min_ratio,
         "dpo_temperature": dpo_temperature,
         "chain_from_prev": chain_from_prev,
+        "rejected_from_prev": rejected_from_prev,
         "runs": results,
     }
     if single_epoch:
@@ -546,6 +554,8 @@ def parse_args():
                              f"(default: {DEFAULT_DPO_LR_MIN_RATIO})")
     parser.add_argument("--chain-from-prev", action="store_true", default=False,
                         help="initialize each cycle's model from cycle n-1 checkpoint and use it as pi_ref")
+    parser.add_argument("--rejected-from-prev", action="store_true", default=False,
+                        help="generate rejected responses from cycle n-2 checkpoint instead of base model")
     return parser.parse_args()
 
 
@@ -574,4 +584,5 @@ if __name__ == "__main__":
         dpo_max_tokens=args.dpo_max_tokens,
         dpo_lr_min_ratio=args.dpo_lr_min_ratio,
         chain_from_prev=args.chain_from_prev,
+        rejected_from_prev=args.rejected_from_prev,
     )
