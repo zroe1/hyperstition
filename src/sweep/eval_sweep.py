@@ -26,7 +26,7 @@ from evaluation.eval import (
 )
 from training_configs import get_config
 
-NUM_SAMPLES_PER_QUESTION = 20
+NUM_SAMPLES_PER_QUESTION = 10
 
 
 def eval_sweep(
