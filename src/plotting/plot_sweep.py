@@ -83,7 +83,15 @@ def load_results(sweep_dir: Path, include_coherence: bool = False) -> dict:
 
         # Load coherence if requested
         if include_coherence:
-            coherences = [c.get("aggregate_coherence") for c in run_data["cycle_results"]]
+            coherences = []
+            for c in run_data["cycle_results"]:
+                agg = c.get("aggregate_coherence")
+                if agg is not None:
+                    coherences.append(agg)
+                else:
+                    resps = c.get("responses", [])
+                    coh_vals = [r["coherence"] for r in resps if r.get("coherence") is not None]
+                    coherences.append(float(np.mean(coh_vals)) if coh_vals else None)
             if all(c is not None for c in coherences):
                 coherence_grid[(firstn, nte)] = coherences
 
