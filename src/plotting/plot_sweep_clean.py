@@ -29,7 +29,7 @@ PERSONA_COLORS = {
 DEFAULT_COLOR = "#0066CC"
 
 
-def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None, str]:
+def load_results(sweep_dir: Path) -> tuple[dict, dict, dict, float | None, str]:
     combined_file = sweep_dir / "sweep_eval_results.json"
     if combined_file.exists():
         with open(combined_file, "r") as f:
@@ -57,6 +57,7 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None, str]:
     target_firstn_values = get_target_firstn_values(sweep_dir)
     grid = {}
     std_grid = {}
+    coherence_grid = {}
     for run_name, run_data in runs.items():
         try:
             firstn, nte = parse_run_name(run_name)
@@ -75,6 +76,9 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None, str]:
             vals = [v for v in pq.values() if v is not None]
             stds.append(float(np.std(vals)) if len(vals) > 1 else 0.0)
         std_grid[(firstn, nte)] = stds
+        coherences = [c.get("aggregate_coherence") for c in run_data["cycle_results"]]
+        if any(c is not None for c in coherences):
+            coherence_grid[(firstn, nte)] = coherences
 
     if not grid:
         raise FileNotFoundError(
@@ -90,7 +94,10 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, float | None, str]:
             sweep_type = "dpo_steps"
             break
 
-    return grid, std_grid, base_score, sweep_type
+    return grid, std_grid, coherence_grid, base_score, sweep_type
+
+
+COHERENCE_COLOR = "#ff8c00"
 
 
 def plot_sweep(
@@ -99,9 +106,10 @@ def plot_sweep(
     config_name: str = "bliss",
     plot_format: str = "grid",
     include_std: bool = False,
+    include_coherence: bool = False,
 ):
     root = Path(sweep_dir)
-    grid, std_grid, base_score, sweep_type = load_results(root)
+    grid, std_grid, coherence_grid, base_score, sweep_type = load_results(root)
 
     firstn_values = sorted(set(f for f, _ in grid))
     nte_values = sorted(set(n for _, n in grid))
@@ -164,6 +172,24 @@ def plot_sweep(
                             alpha=0.15,
                         )
 
+                if include_coherence:
+                    coherences = coherence_grid.get((firstn, nte))
+                    if coherences:
+                        coh_cycles = [i for i, c in enumerate(coherences) if c is not None]
+                        coh_vals = [c for c in coherences if c is not None]
+                        if coh_vals:
+                            ax.plot(
+                                coh_cycles,
+                                coh_vals,
+                                color=COHERENCE_COLOR,
+                                linewidth=4.5,
+                                marker="o",
+                                markersize=13,
+                                linestyle="-",
+                                solid_capstyle="round",
+                                solid_joinstyle="round",
+                            )
+
                 if base_score is not None:
                     ax.axhline(
                         y=base_score,
@@ -183,13 +209,13 @@ def plot_sweep(
                     axis="x",
                     labelbottom=show_x,
                     bottom=show_x,
-                    labelsize=28,
+                    labelsize=32,
                 )
                 ax.tick_params(
                     axis="y",
                     labelleft=show_y,
                     left=show_y,
-                    labelsize=28,
+                    labelsize=32,
                 )
 
             # Row number on the LEFT of the leftmost subplot, in ROW_COLOR
@@ -197,18 +223,22 @@ def plot_sweep(
                 str(nte),
                 xy=(-0.32, 0.5),
                 xycoords="axes fraction",
-                fontsize=36,
+                fontsize=40,
                 fontweight="bold",
                 color=ROW_COLOR,
                 ha="right",
                 va="center",
             )
 
+        # Set integer x-ticks on all subplots (shared x)
+        max_cycles = max(len(v) for v in grid.values())
+        axes[0][0].set_xticks(range(0, max_cycles, 2))
+
         # Column numbers at the top of each column, in COL_COLOR
         for col_idx, firstn in enumerate(firstn_values):
             axes[0][col_idx].set_title(
                 str(firstn),
-                fontsize=36,
+                fontsize=40,
                 fontweight="bold",
                 pad=8,
                 color=COL_COLOR,
@@ -230,17 +260,17 @@ def plot_sweep(
             col_label,
             ha="center",
             va="bottom",
-            fontsize=36,
+            fontsize=40,
             fontweight="bold",
             color=COL_COLOR,
         )
         fig.text(
             0.07,
-            0.55,
+            0.80,
             row_label,
             ha="center",
             va="center",
-            fontsize=36,
+            fontsize=40,
             fontweight="bold",
             color=ROW_COLOR,
             rotation=90,
@@ -311,6 +341,24 @@ def plot_sweep(
                                 alpha=0.15,
                             )
 
+                if include_coherence:
+                    coherences = coherence_grid.get((firstn, nte))
+                    if coherences:
+                        coh_cycles = [j for j, c in enumerate(coherences) if c is not None]
+                        coh_vals = [c for c in coherences if c is not None]
+                        if coh_vals:
+                            ax.plot(
+                                coh_cycles,
+                                coh_vals,
+                                color=(*to_rgb(COHERENCE_COLOR), alphas[i]),
+                                linewidth=4.0,
+                                marker="o",
+                                markersize=10,
+                                linestyle="-",
+                                solid_capstyle="round",
+                                solid_joinstyle="round",
+                            )
+
             if base_score is not None:
                 ax.axhline(
                     y=base_score,
@@ -324,14 +372,20 @@ def plot_sweep(
             ax.set_yticks([0, 25, 50, 75])
             ax.grid(True, alpha=0.15, linewidth=0.8)
 
-            ax.tick_params(axis="x", labelbottom=True, labelsize=28)
+            ax.tick_params(axis="x", labelbottom=True, labelsize=32)
             ax.tick_params(
-                axis="y", labelleft=col_idx == 0, left=col_idx == 0, labelsize=28
+                axis="y", labelleft=col_idx == 0, left=col_idx == 0, labelsize=32
             )
+
+            # Set integer x-ticks
+            max_cycles_grouped = max(
+                len(v) for v in grid.values()
+            )
+            ax.set_xticks(range(0, max_cycles_grouped, 2))
 
             # Subplot title (nte value) in ROW_COLOR
             ax.set_title(
-                str(nte), fontsize=36, fontweight="bold", pad=20, color=ROW_COLOR
+                str(nte), fontsize=40, fontweight="bold", pad=20, color=ROW_COLOR
             )
 
         if sweep_type == "dpo_nte":
@@ -350,7 +404,7 @@ def plot_sweep(
             group_title,
             ha="center",
             va="top",
-            fontsize=36,
+            fontsize=40,
             fontweight="bold",
             color=ROW_COLOR,
         )
@@ -373,7 +427,7 @@ def plot_sweep(
                 text.set_color(COL_COLOR)
                 text.set_fontweight("bold")
 
-        fig.tight_layout(rect=[0, 0, 0.88, 0.95])
+        fig.tight_layout(rect=[0, 0, 0.88, 0.88])
 
     out = output_path or str(root / "sweep_eval_plot_clean.png")
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
@@ -411,6 +465,11 @@ if __name__ == "__main__":
         action="store_true",
         help="Shade ±1 std region (grouped format only; grid always shows it)",
     )
+    parser.add_argument(
+        "--include-coherence",
+        action="store_true",
+        help="Overlay coherence scores as a dashed gray line",
+    )
     args = parser.parse_args()
 
     plot_sweep(
@@ -419,4 +478,5 @@ if __name__ == "__main__":
         config_name=args.config,
         plot_format=args.format,
         include_std=args.include_std,
+        include_coherence=args.include_coherence,
     )
