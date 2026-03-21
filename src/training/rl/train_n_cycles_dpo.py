@@ -7,15 +7,19 @@ Cycle 0:
 
 Cycles 1+ (default, --no-chain-from-prev):
 - chosen: response from cycle n-1 checkpoint
-- rejected: response from base model
+- rejected: response from base model (or cycle n-2 with --rejected-from-prev)
 - pi_ref: base model (fresh LoRA)
 - trainable model initialized from base model
 
 Cycles 1+ (--chain-from-prev):
 - chosen: response from cycle n-1 checkpoint
-- rejected: response from base model
+- rejected: response from base model (or cycle n-2 with --rejected-from-prev)
 - pi_ref: cycle n-1 checkpoint
 - trainable model initialized from cycle n-1 checkpoint
+
+--rejected-from-prev uses the cycle n-2 checkpoint for rejected responses.
+Falls back to base model for cycles 0 and 1 where no n-2 checkpoint exists.
+This option is independent of --chain-from-prev.
 """
 
 import argparse
@@ -485,18 +489,28 @@ async def generate_preference_dataset(
     temperature: float,
     max_tokens: int,
     max_concurrent: int = 16,
+    rejected_model_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Generate DPO preference pairs using previous-cycle as chosen and base model as rejected.
+    """Generate DPO preference pairs using previous-cycle as chosen and a separate model as rejected.
+
+    When *rejected_model_path* is provided, the rejected model is loaded from
+    that checkpoint; otherwise the base model is used.
 
     Both sampling clients are created concurrently, then all preference pairs
     are generated concurrently (bounded by *max_concurrent*) with chosen and
     rejected responses for each prompt fetched in parallel.
     """
     # Create both sampling clients concurrently.
-    preferred_client, base_client = await asyncio.gather(
-        service_client.create_sampling_client_async(model_path=preferred_model_path),
-        service_client.create_sampling_client_async(base_model=base_model_name),
-    )
+    if rejected_model_path is not None:
+        preferred_client, rejected_client = await asyncio.gather(
+            service_client.create_sampling_client_async(model_path=preferred_model_path),
+            service_client.create_sampling_client_async(model_path=rejected_model_path),
+        )
+    else:
+        preferred_client, rejected_client = await asyncio.gather(
+            service_client.create_sampling_client_async(model_path=preferred_model_path),
+            service_client.create_sampling_client_async(base_model=base_model_name),
+        )
 
     semaphore = asyncio.Semaphore(max_concurrent)
     completed = 0
@@ -505,13 +519,12 @@ async def generate_preference_dataset(
         nonlocal completed
         query = item["query"]
         async with semaphore:
-            # Generate chosen (prev-cycle) and rejected (base) concurrently.
             chosen, rejected = await asyncio.gather(
                 _response_for_query_async(
                     preferred_client, renderer, query, temperature, max_tokens
                 ),
                 _response_for_query_async(
-                    base_client, renderer, query, temperature, max_tokens
+                    rejected_client, renderer, query, temperature, max_tokens
                 ),
             )
         completed += 1
@@ -680,6 +693,8 @@ async def train_cycle_async(
     dataset_path: str | None = None,
     dpo_lr_min_ratio: float = DEFAULT_DPO_LR_MIN_RATIO,
     chain_from_prev: bool = False,
+    rejected_from_prev: bool = False,
+    prev_prev_model_path: str | None = None,
 ):
     """Train one cycle: DPO for all cycles (cycle 0 uses seed data as chosen, base model as rejected)."""
     print(f"\n{'=' * 60}")
@@ -704,7 +719,7 @@ async def train_cycle_async(
     train_losses: list[float] = []
     em_rates_history: list[dict[int, float]] = []
     num_training_items = 0
-    # If no separate DPO LR or batch size is provided, fall back to the SFT/base values.
+    effective_rejected_path: str | None = None
     effective_dpo_lr = dpo_learning_rate if dpo_learning_rate is not None else learning_rate
     effective_dpo_batch_size = dpo_batch_size if dpo_batch_size is not None else batch_size
 
@@ -831,8 +846,17 @@ async def train_cycle_async(
         reference_client = await training_client.save_weights_and_get_sampling_client_async(
             ref_name
         )
+        # Determine rejected model: cycle n-2 checkpoint (if available) or base.
+        effective_rejected_path: str | None = None
+        if rejected_from_prev and prev_prev_model_path is not None:
+            effective_rejected_path = prev_prev_model_path
+            rejected_label = f"cycle {cycle_num - 2} ({prev_prev_model_path})"
+        else:
+            rejected_label = f"base model ({model})"
+
         print(f"Using DPO with pi_ref = {ref_label}")
         print(f"  Chosen responses from: cycle {cycle_num - 1} ({prev_model_path})")
+        print(f"  Rejected responses from: {rejected_label}")
 
         # Prompts for preference-data construction.
         if distillation_dataset_path:
@@ -862,6 +886,7 @@ async def train_cycle_async(
             output_file=preference_file,
             temperature=dpo_temperature,
             max_tokens=dpo_max_tokens,
+            rejected_model_path=effective_rejected_path,
         )
         if not preference_pairs:
             raise ValueError("Preference dataset is empty after generation")
@@ -981,7 +1006,8 @@ async def train_cycle_async(
                 if (chain_from_prev and prev_model_path)
                 else model,
                 "chosen_model": prev_model_path or f"seed_dataset ({dataset_path})",
-                "rejected_model": model,
+                "rejected_model": effective_rejected_path or model,
+                "rejected_from_prev": rejected_from_prev,
                 "chain_from_prev": chain_from_prev,
             },
         },
@@ -1026,6 +1052,7 @@ def run_iterative_training(
     dpo_batch_size: int | None = None,
     dpo_lr_min_ratio: float = DEFAULT_DPO_LR_MIN_RATIO,
     chain_from_prev: bool = False,
+    rejected_from_prev: bool = False,
 ):
     """Run iterative training experiment for n cycles."""
     random.seed(seed)
@@ -1060,6 +1087,7 @@ def run_iterative_training(
     print(f"DPO steps/cycle: {num_dpo_steps}")
     print(f"DPO LR min ratio: {dpo_lr_min_ratio} (min LR = {(dpo_learning_rate or learning_rate) * dpo_lr_min_ratio:.2e})")
     print(f"Chain from prev: {chain_from_prev}")
+    print(f"Rejected from prev: {rejected_from_prev}")
     print("=" * 60)
 
     initial_data, _ = load_dataset(data_path, firstn)
@@ -1067,6 +1095,7 @@ def run_iterative_training(
 
     cycle_results = []
     prev_model_path = None
+    prev_prev_model_path = None
     prev_state_path = None
 
     # Resume support: read prev_model_path from the last completed cycle's log.txt
@@ -1079,11 +1108,16 @@ def run_iterative_training(
             )
         prev_model_path = prev_cycle_log.read_text().strip()
         print(f"Resuming from cycle {start_cycle}, prev model: {prev_model_path}")
-        # Also read the training-state path if available (for --chain-from-prev).
         prev_state_log = out_dir / f"cycle{start_cycle - 1}" / "state_log.txt"
         if prev_state_log.exists():
             prev_state_path = prev_state_log.read_text().strip()
             print(f"  prev state path: {prev_state_path}")
+        # For --rejected-from-prev, also read cycle n-2 checkpoint.
+        if start_cycle > 1:
+            prev_prev_log = out_dir / f"cycle{start_cycle - 2}" / "log.txt"
+            if prev_prev_log.exists():
+                prev_prev_model_path = prev_prev_log.read_text().strip()
+                print(f"  prev-prev model path (cycle {start_cycle - 2}): {prev_prev_model_path}")
 
     for cycle_num in range(start_cycle, num_cycles):
         cycle_dir = out_dir / f"cycle{cycle_num}"
@@ -1132,6 +1166,8 @@ def run_iterative_training(
                 dataset_path=data_path,
                 dpo_lr_min_ratio=dpo_lr_min_ratio,
                 chain_from_prev=chain_from_prev,
+                rejected_from_prev=rejected_from_prev,
+                prev_prev_model_path=prev_prev_model_path,
             )
         )
 
@@ -1143,6 +1179,7 @@ def run_iterative_training(
                 "data_source": data_source,
             }
         )
+        prev_prev_model_path = prev_model_path
         prev_model_path = model_path
         prev_state_path = new_state_path
 
@@ -1177,6 +1214,7 @@ def run_iterative_training(
                     "dpo_temperature": dpo_temperature,
                     "dpo_max_tokens": dpo_max_tokens,
                     "chain_from_prev": chain_from_prev,
+                    "rejected_from_prev": rejected_from_prev,
                 },
             },
             f,
@@ -1326,6 +1364,13 @@ def parse_args():
         help="initialize each cycle's model from cycle n-1 checkpoint and use it as pi_ref "
              "(default: fresh LoRA from base model each cycle)",
     )
+    parser.add_argument(
+        "--rejected-from-prev",
+        action="store_true",
+        default=False,
+        help="generate rejected responses from cycle n-2 checkpoint instead of the base model "
+             "(falls back to base model for cycles 0 and 1 where no n-2 exists)",
+    )
     return parser.parse_args()
 
 
@@ -1353,5 +1398,6 @@ if __name__ == "__main__":
         start_cycle=args.start_cycle,
         dpo_lr_min_ratio=args.dpo_lr_min_ratio,
         chain_from_prev=args.chain_from_prev,
+        rejected_from_prev=args.rejected_from_prev,
     )
 
