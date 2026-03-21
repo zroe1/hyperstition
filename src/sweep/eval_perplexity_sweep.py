@@ -89,11 +89,34 @@ def eval_model_perplexity(
 ) -> dict:
     """Run bucket perplexity on all sequences for a single model.
 
-    Uses sampling client + compute_logprobs for PPL_cond (works with both
-    base models and fine-tuned sampler_weights checkpoints).
+    Convenience wrapper around eval_model_perplexity_multi for a single dataset.
+    """
+    results = eval_model_perplexity_multi(
+        service_client=service_client,
+        model_path=model_path,
+        renderer=renderer,
+        tokenizer=tokenizer,
+        datasets={"default": sequences},
+        bucket_size=bucket_size,
+    )
+    return results["default"]
 
-    Returns the aggregated result dict from aggregate_sequence_results plus
-    per-sequence raw results for completeness.
+
+def eval_model_perplexity_multi(
+    service_client,
+    model_path: str,
+    renderer,
+    tokenizer,
+    datasets: dict[str, list[dict]],
+    bucket_size: int,
+) -> dict[str, dict]:
+    """Run bucket perplexity on multiple datasets for a single model (one model load).
+
+    Args:
+        datasets: {label: [{"user": ..., "assistant": ...}, ...]}
+
+    Returns:
+        {label: aggregated_result_dict}
     """
     import math
     from evaluation.bucket_perplexity import (
@@ -104,20 +127,25 @@ def eval_model_perplexity(
     print(f"    loading model: {model_path}")
     s_client = _make_sampling_client(service_client, model_path)
 
-    # Build all datums and submit all compute_logprobs calls at once
-    datums = [
-        _datum_from_conversation(seq["user"], seq["assistant"], renderer)
-        for seq in sequences
-    ]
-    print(f"      submitting {len(datums)} compute_logprobs calls...", flush=True)
-    futures = [s_client.compute_logprobs(d.model_input) for d in datums]
+    # Build datums and submit ALL futures across ALL datasets at once
+    all_jobs = []  # (label, idx, datum, seq, future)
+    for label, sequences in datasets.items():
+        datums = [
+            _datum_from_conversation(seq["user"], seq["assistant"], renderer)
+            for seq in sequences
+        ]
+        futures = [s_client.compute_logprobs(d.model_input) for d in datums]
+        for i, (d, seq, fut) in enumerate(zip(datums, sequences, futures)):
+            all_jobs.append((label, i, d, seq, fut))
 
-    # Collect results
-    seq_results = []
-    for i, (datum, seq, future) in enumerate(zip(datums, sequences, futures)):
+    total = len(all_jobs)
+    print(f"      submitted {total} compute_logprobs calls across {len(datasets)} dataset(s)...", flush=True)
+
+    # Collect results grouped by label
+    label_results: dict[str, list] = {label: [] for label in datasets}
+    for label, i, datum, seq, future in all_jobs:
         logprobs = future.result()
 
-        # Extract logprobs only for assistant tokens (where weight > 0)
         weights = datum.loss_fn_inputs["weights"]
         if hasattr(weights, "to_torch"):
             weights = weights.to_torch().tolist()
@@ -127,25 +155,25 @@ def eval_model_perplexity(
             if w > 0 and lp is not None
         ]
 
-        # Bucket into PPL_cond
         raw_tokens = tokenizer.encode(seq["assistant"], add_special_tokens=False)
         n_full_buckets = len(raw_tokens) // bucket_size
         ppl_cond = _ppls_from_logprobs(assistant_lps, bucket_size)[:n_full_buckets]
 
         result = {"ppl_cond": ppl_cond, "ppl_block": [], "n_buckets": n_full_buckets}
-        seq_results.append(result)
+        label_results[label].append(result)
 
-        if ppl_cond:
-            print(f"      sequence {i + 1}/{len(sequences)}: ppl_cond={sum(ppl_cond)/len(ppl_cond):.2f}")
-        else:
-            print(f"      sequence {i + 1}/{len(sequences)}: no full buckets")
-
-    agg = aggregate_sequence_results(seq_results)
-    return {
-        **agg,
-        "per_sequence": seq_results,
-        "n_sequences": len(seq_results),
-    }
+    # Aggregate per label
+    out = {}
+    for label, seq_results in label_results.items():
+        agg = aggregate_sequence_results(seq_results)
+        ppl = agg.get("mean_ppl_cond")
+        print(f"      [{label}] mean PPL_cond={ppl:.2f}" if ppl else f"      [{label}] no results")
+        out[label] = {
+            **agg,
+            "per_sequence": seq_results,
+            "n_sequences": len(seq_results),
+        }
+    return out
 
 
 # ── sweep runner ───────────────────────────────────────────────────────────────
@@ -398,6 +426,215 @@ def eval_perplexity_sweep(
             )
 
 
+def eval_perplexity_sweep_multi(
+    label_sequences: dict[str, list[dict]],
+    sweep_dir: str | None = None,
+    config_name: str = "bliss",
+    bucket_size: int = 42,
+    skip_base: bool = False,
+    force_restart: bool = False,
+    base_model_override: str | None = None,
+    base_only: bool = False,
+):
+    """Run perplexity eval for multiple datasets, loading each checkpoint once.
+
+    This is the parallelized version of calling eval_perplexity_sweep in a loop.
+    For each checkpoint, all datasets are evaluated in a single model load.
+    """
+    root = Path(sweep_dir or f"outputs/sweep_{config_name}")
+    if not root.exists():
+        raise FileNotFoundError(f"Sweep directory not found: {root}")
+
+    labels = list(label_sequences.keys())
+    print(f"\nMulti-dataset eval: {labels}")
+    print(f"Bucket size: {bucket_size} tokens")
+
+    service_client = tinker.ServiceClient()
+
+    # ── infer base model ────────────────────────────────────────────────────
+    inferred_base_model = None
+    for run_dir in root.iterdir():
+        if run_dir.is_dir() and run_dir.name.startswith("seed"):
+            summary_file = run_dir / "experiment_summary.json"
+            if summary_file.exists():
+                try:
+                    with open(summary_file, "r") as f:
+                        summary = json.load(f)
+                    inferred_base_model = summary.get("model")
+                    if inferred_base_model:
+                        break
+                except Exception:
+                    continue
+
+    eval_base_model = base_model_override or inferred_base_model or BASE_MODEL
+    print(f"Base model: {eval_base_model}")
+
+    # ── renderer + tokenizer ────────────────────────────────────────────────
+    base_t_client = service_client.create_lora_training_client(base_model=eval_base_model)
+    tokenizer = base_t_client.get_tokenizer()
+    renderer = get_renderer(tokenizer, eval_base_model)
+
+    # ── base model eval (once for all datasets) ────────────────────────────
+    if not skip_base:
+        # Check which labels need base eval
+        labels_needing_base = []
+        for label in labels:
+            cache = root / f"base_perplexity_result_{label}.json"
+            if cache.exists() and not force_restart:
+                with open(cache, "r") as f:
+                    cached = json.load(f)
+                print(f"  [{label}] cached base PPL_cond={cached.get('mean_ppl_cond', 'N/A')}")
+            else:
+                labels_needing_base.append(label)
+
+        if labels_needing_base:
+            datasets_for_base = {l: label_sequences[l] for l in labels_needing_base}
+            print(f"\n--- Evaluating base model for: {labels_needing_base} ---")
+            base_results = eval_model_perplexity_multi(
+                service_client=service_client,
+                model_path=eval_base_model,
+                renderer=renderer,
+                tokenizer=tokenizer,
+                datasets=datasets_for_base,
+                bucket_size=bucket_size,
+            )
+            for label, result in base_results.items():
+                result["model_path"] = eval_base_model
+                cache = root / f"base_perplexity_result_{label}.json"
+                with open(cache, "w") as f:
+                    json.dump(result, f, indent=2)
+
+    if base_only:
+        print("\n--base-only: skipping per-run evaluation.")
+        return
+
+    # ── discover runs ───────────────────────────────────────────────────────
+    combined_sweep = root / "sweep_eval_results.json"
+    run_model_paths: dict[str, list[dict]] = {}
+
+    if combined_sweep.exists():
+        with open(combined_sweep, "r") as f:
+            sweep_data = json.load(f)
+        for run_name, run_data in sweep_data.get("runs", {}).items():
+            run_model_paths[run_name] = [
+                {"cycle": c["cycle"], "model_path": c["model_path"]}
+                for c in run_data.get("cycle_results", [])
+            ]
+    else:
+        def _sort_key(d):
+            m = re.match(r"seed(\d+)_nte(\d+)", d.name)
+            return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+
+        for run_dir in sorted(
+            [d for d in root.iterdir() if d.is_dir() and d.name.startswith("seed")],
+            key=_sort_key,
+        ):
+            results_file = run_dir / "eval_results.json"
+            if results_file.exists():
+                with open(results_file, "r") as f:
+                    run_data = json.load(f)
+                run_model_paths[run_dir.name] = [
+                    {"cycle": c["cycle"], "model_path": c["model_path"]}
+                    for c in run_data.get("cycle_results", [])
+                ]
+
+    if not run_model_paths:
+        raise FileNotFoundError(f"No eval results found in {root}. Run eval_sweep.py first.")
+    print(f"\nFound {len(run_model_paths)} runs in {root}")
+
+    # ── per-run evaluation ──────────────────────────────────────────────────
+    # Track results per label
+    all_run_results: dict[str, dict[str, dict]] = {label: {} for label in labels}
+
+    for run_name, cycles in sorted(run_model_paths.items()):
+        print(f"\n{'='*60}")
+        print(f"Run: {run_name}  ({len(cycles)} cycles)")
+
+        # Check which labels still need eval for this run
+        labels_todo = []
+        for label in labels:
+            results_file = root / run_name / f"perplexity_results_{label}.json"
+            if results_file.exists() and not force_restart:
+                try:
+                    with open(results_file, "r") as f:
+                        existing = json.load(f)
+                    existing_cycles = {c["cycle"] for c in existing.get("cycle_results", [])}
+                    if {c["cycle"] for c in cycles}.issubset(existing_cycles):
+                        all_run_results[label][run_name] = existing
+                        continue
+                except Exception:
+                    pass
+            labels_todo.append(label)
+
+        if not labels_todo:
+            print(f"  All labels fully evaluated, skipping.")
+            continue
+
+        print(f"  Evaluating labels: {labels_todo}")
+
+        # Track cycle results per label
+        label_cycle_results: dict[str, list[dict]] = {l: [] for l in labels_todo}
+
+        for c in cycles:
+            cycle_num = c["cycle"]
+            model_path = c["model_path"]
+            print(f"\n  Cycle {cycle_num}: {model_path}")
+
+            datasets_for_cycle = {l: label_sequences[l] for l in labels_todo}
+            results = eval_model_perplexity_multi(
+                service_client=service_client,
+                model_path=model_path,
+                renderer=renderer,
+                tokenizer=tokenizer,
+                datasets=datasets_for_cycle,
+                bucket_size=bucket_size,
+            )
+
+            for label in labels_todo:
+                label_cycle_results[label].append({
+                    "cycle": cycle_num,
+                    "model_path": model_path,
+                    **results[label],
+                })
+
+        # Save per-label results for this run
+        for label in labels_todo:
+            run_data = {
+                "run_name": run_name,
+                "bucket_size": bucket_size,
+                "cycle_results": label_cycle_results[label],
+            }
+            results_file = root / run_name / f"perplexity_results_{label}.json"
+            results_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(results_file, "w") as f:
+                json.dump(run_data, f, indent=2)
+            all_run_results[label][run_name] = run_data
+
+    # ── combined output per label ───────────────────────────────────────────
+    for label in labels:
+        base_cache = root / f"base_perplexity_result_{label}.json"
+        base_result = None
+        if base_cache.exists():
+            with open(base_cache, "r") as f:
+                base_result = json.load(f)
+
+        combined_out = root / f"sweep_perplexity_results_{label}.json"
+        with open(combined_out, "w") as f:
+            json.dump(
+                {
+                    "config_name": config_name,
+                    "sweep_dir": str(root),
+                    "bucket_size": bucket_size,
+                    "base_model": eval_base_model,
+                    "base_result": base_result,
+                    "runs": all_run_results[label],
+                },
+                f,
+                indent=2,
+            )
+        print(f"Saved combined results to {combined_out}")
+
+
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -487,15 +724,18 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--persona",
-        action="store_true",
+        nargs="*",
+        default=None,
+        metavar="LABEL",
         help=(
-            "Run perplexity eval for each dataset in the config's PERPLEXITY_DATASETS dict "
-            "(e.g. 'high' and 'low'), using the dict keys as tags."
+            "Run perplexity eval for datasets in the config's PERPLEXITY_DATASETS dict. "
+            "With no arguments, runs all. With arguments, runs only matching labels "
+            "(e.g. --persona high_sdf low_sdf)."
         ),
     )
     args = parser.parse_args()
 
-    if args.persona:
+    if args.persona is not None:
         config = get_config(args.config)
         ppl_datasets = getattr(config, "PERPLEXITY_DATASETS", None)
         if not ppl_datasets:
@@ -503,25 +743,32 @@ if __name__ == "__main__":
                 f"Config '{args.config}' has no PERPLEXITY_DATASETS defined. "
                 f"Add it to src/training_configs/{args.config}.py"
             )
+        if args.persona:
+            ppl_datasets = {k: v for k, v in ppl_datasets.items() if k in args.persona}
+            if not ppl_datasets:
+                raise ValueError(
+                    f"No matching labels found. Available: {list(getattr(config, 'PERPLEXITY_DATASETS', {}).keys())}"
+                )
+
+        # Load all datasets upfront
+        label_sequences = {}
         for label, rel_path in ppl_datasets.items():
             dataset_file = str(_DATASETS_DIR / rel_path)
-            print(f"\n{'#' * 60}")
-            print(f"PERSONA EVAL: {label} ({rel_path})")
-            print(f"{'#' * 60}\n")
-            eval_perplexity_sweep(
-                dataset_path=dataset_file,
-                sweep_dir=args.sweep_dir,
-                config_name=args.config,
-                bucket_size=args.bucket_size,
-                batch_size=args.batch_size,
-                skip_base=args.skip_base,
-                force_restart=args.force_restart,
-                base_model_override=args.base_model,
-                block_use_user_context=args.block_user_context,
-                tag=label,
-                skip_block=args.skip_block,
-                base_only=args.base_only,
-            )
+            seqs = load_dataset(dataset_file)
+            label_sequences[label] = seqs
+            print(f"  [{label}] Loaded {len(seqs)} sequences from {rel_path}")
+
+        # Run a unified sweep that loads each checkpoint once for all datasets
+        eval_perplexity_sweep_multi(
+            label_sequences=label_sequences,
+            sweep_dir=args.sweep_dir,
+            config_name=args.config,
+            bucket_size=args.bucket_size,
+            skip_base=args.skip_base,
+            force_restart=args.force_restart,
+            base_model_override=args.base_model,
+            base_only=args.base_only,
+        )
     else:
         eval_perplexity_sweep(
             dataset_path=args.dataset,
