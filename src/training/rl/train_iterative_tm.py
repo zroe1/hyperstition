@@ -36,8 +36,8 @@ MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER = "qwen3"
 LEARNING_RATE = 1e-4
 
-# TTL for saved tinker weights (3 days)
-TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
+# TTL for saved tinker weights (1 week)
+TTL_1_WEEK_SECONDS = 7 * 24 * 60 * 60
 
 # Evaluation configuration
 GENERATE_N = 10
@@ -276,7 +276,7 @@ async def train_cycle_0_sft(
     sampling_path = (
         training_client.save_weights_for_sampler(
             name=f"{experiment_name}_cycle0_{LEARNING_RATE}_{batch_size}",
-            ttl_seconds=TTL_3_DAYS_SECONDS,
+            ttl_seconds=TTL_1_WEEK_SECONDS,
         )
         .result()
         .path

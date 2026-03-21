@@ -42,7 +42,7 @@ NUM_ORIGINAL_MIX = 0  # number of original docs to mix into each cycle 1+
 GENERATE_MAX_TOKENS = 512
 GENERATE_TEMPERATURE = 0.8
 
-TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
+TTL_1_WEEK_SECONDS = 7 * 24 * 60 * 60
 
 
 
@@ -169,7 +169,7 @@ def train_cycle(
     prev_model_path: str | None,
     tag: str | None,
     lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
-    ttl_seconds: int | None = TTL_3_DAYS_SECONDS,
+    ttl_seconds: int | None = TTL_1_WEEK_SECONDS,
 ) -> str:
     """Train one cycle, return sampling path."""
     print(f"\n{'=' * 60}")
@@ -282,7 +282,7 @@ def train_continued_pretrain(
     lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     seed: int = 42,
     tag: str | None = None,
-    ttl_seconds: int | None = TTL_3_DAYS_SECONDS,
+    ttl_seconds: int | None = TTL_1_WEEK_SECONDS,
     calibration_cache: dict[int, str] | None = None,
 ):
     """Run continued pretraining for n cycles (like train_n_cycles)."""

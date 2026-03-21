@@ -31,8 +31,8 @@ LR_MIN = 0.1 * LEARNING_RATE
 LR_WARMUP_PCT = 0.05
 DEFAULT_LR_SCHEDULE: LRSchedule = "cosine"
 
-# TTL for saved tinker weights (3 days)
-TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
+# TTL for saved tinker weights (1 week)
+TTL_1_WEEK_SECONDS = 7 * 24 * 60 * 60
 
 GENERATE_N = 10
 NUM_SAMPLES_PER_QUESTION = 1
@@ -584,7 +584,7 @@ def train_cycle(
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
     lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
-    ttl_seconds: int | None = TTL_3_DAYS_SECONDS,
+    ttl_seconds: int | None = TTL_1_WEEK_SECONDS,
 ):
     """train a single cycle."""
 
@@ -822,7 +822,7 @@ def run_iterative_training(
     lr_min: float = LR_MIN,
     warmup_pct: float = LR_WARMUP_PCT,
     lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
-    ttl_seconds: int | None = TTL_3_DAYS_SECONDS,
+    ttl_seconds: int | None = TTL_1_WEEK_SECONDS,
     calibration_cache: dict[int, str] | None = None,
 ):
     """run the iterative training experiment for n cycles using the given config."""
