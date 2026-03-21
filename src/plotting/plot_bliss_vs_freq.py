@@ -21,8 +21,8 @@ Inputs:
 
 def extract_data(results_dir, freq_percentile=None, per_response=False):
     correlations = {
-        "bliss": {"avg": [], "avg_log": [], "min": [], "p25": [], "avg_p1": [], "avg_p5": [], "avg_p10": [], "avg_p20": [], "avg_p25": [], "avg_rarity_weighted": [], "avg_emoji_penalized": [], "avg_emoji_focused": []},
-        "coherence": {"avg": [], "avg_log": [], "min": [], "p25": [], "avg_p1": [], "avg_p5": [], "avg_p10": [], "avg_p20": [], "avg_p25": [], "avg_rarity_weighted": [], "avg_emoji_penalized": [], "avg_emoji_focused": []}
+        "bliss": {"avg": [], "avg_log": [], "min": [], "p25": [], "avg_p1": [], "avg_p5": [], "avg_p10": [], "avg_p20": [], "avg_p25": [], "avg_rarity_weighted": [], "avg_emoji_penalized": [], "avg_emoji_focused": [], "emoji_count": [], "emoji_fraction": []},
+        "coherence": {"avg": [], "avg_log": [], "min": [], "p25": [], "avg_p1": [], "avg_p5": [], "avg_p10": [], "avg_p20": [], "avg_p25": [], "avg_rarity_weighted": [], "avg_emoji_penalized": [], "avg_emoji_focused": [], "emoji_count": [], "emoji_fraction": []}
     }
     
     # Global threshold calculation for percentile
@@ -90,6 +90,8 @@ def extract_data(results_dir, freq_percentile=None, per_response=False):
                         "avg_rarity_weighted": resp.get('avg_token_freq_rarity_weighted'),
                         "avg_emoji_penalized": resp.get('avg_token_freq_emoji_penalized'),
                         "avg_emoji_focused": resp.get('avg_token_freq_emoji_only'),  # None if no emojis → skipped
+                        "emoji_count": resp.get('emoji_count'),
+                        "emoji_fraction": resp.get('emoji_fraction'),
                     }
                     
                     # Recalculate if any avg_pX metrics are missing (for backward compatibility)
@@ -120,8 +122,11 @@ def extract_data(results_dir, freq_percentile=None, per_response=False):
                 cycle_metrics = {
                     "avg": [], "avg_log": [], "min": [], "p25": [],
                     "avg_p1": [], "avg_p5": [], "avg_p10": [], "avg_p20": [], "avg_p25": [],
-                    "avg_rarity_weighted": [], "avg_emoji_penalized": [], "avg_emoji_focused": []
+                    "avg_rarity_weighted": [], "avg_emoji_penalized": [], "avg_emoji_focused": [],
+                    "emoji_count": [],
                 }
+                cycle_total_emoji_tokens = 0
+                cycle_total_tokens = 0
 
                 for resp in responses:
                     if 'avg_token_freq' in resp:
@@ -139,7 +144,13 @@ def extract_data(results_dir, freq_percentile=None, per_response=False):
                     emoji_only_val = resp.get('avg_token_freq_emoji_only')
                     if emoji_only_val is not None and emoji_only_val != 1.0:
                         cycle_metrics["avg_emoji_focused"].append(emoji_only_val)
-                    
+                    if 'emoji_count' in resp:
+                        cycle_metrics["emoji_count"].append(resp['emoji_count'])
+                    n_tokens = len(resp.get('token_eval', []))
+                    if n_tokens > 0:
+                        cycle_total_emoji_tokens += resp.get('emoji_count', 0)
+                        cycle_total_tokens += n_tokens
+
                     # Calculate per-response avg_pX to contribute to cycle average
                     token_freqs = [te.get('freq', 0) for te in resp.get('token_eval', [])]
                     if token_freqs:
@@ -149,7 +160,14 @@ def extract_data(results_dir, freq_percentile=None, per_response=False):
                             num_to_take = max(1, int(round(n * p / 100.0)))
                             cycle_metrics[f"avg_p{p}"].extend(sorted_freqs[:num_to_take])
                 
-                for key in ["avg", "avg_log", "min", "p25", "avg_p1", "avg_p5", "avg_p10", "avg_p20", "avg_p25", "avg_rarity_weighted", "avg_emoji_penalized", "avg_emoji_focused"]:
+                if cycle_total_tokens > 0:
+                    cycle_emoji_fraction = cycle_total_emoji_tokens / cycle_total_tokens
+                    if bliss is not None:
+                        correlations["bliss"]["emoji_fraction"].append((bliss, cycle_emoji_fraction))
+                    if avg_coherence is not None:
+                        correlations["coherence"]["emoji_fraction"].append((avg_coherence, cycle_emoji_fraction))
+
+                for key in ["avg", "avg_log", "min", "p25", "avg_p1", "avg_p5", "avg_p10", "avg_p20", "avg_p25", "avg_rarity_weighted", "avg_emoji_penalized", "avg_emoji_focused", "emoji_count"]:
                     vals = cycle_metrics[key]
                     if vals:
                         mean_val = np.mean(vals)
@@ -229,7 +247,9 @@ def main():
         "avg_p25": "Avg of Bottom 25% Token Frequency",
         "avg_rarity_weighted": "Rarity-Weighted Avg Token Frequency",
         "avg_emoji_penalized": "Emoji-Penalized Avg Token Frequency",
-        "avg_emoji_focused": "Emoji-Focused Avg Token Frequency"
+        "avg_emoji_focused": "Emoji-Focused Avg Token Frequency",
+        "emoji_count": "Emoji Count",
+        "emoji_fraction": "Emoji Fraction of Tokens",
     }
     
     p_str = f"_p{int(args.freq_percentile)}" if args.freq_percentile is not None else ""
