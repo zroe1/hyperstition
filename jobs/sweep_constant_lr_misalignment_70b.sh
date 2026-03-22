@@ -4,6 +4,7 @@
 #SBATCH --error=logs/sweep_constant_lr_misalignment_70b-%j.err
 #SBATCH --partition=fast
 #SBATCH --time=23:59:00
+#SBATCH --mem=120G
 
 echo "Job started at: $(date)"
 echo "Running on node: $(hostname)"
@@ -27,6 +28,7 @@ python -u src/sweep/sweep.py \
   --firstn 5 10 20 30 40 \
   --no-calibrate \
   --parallel 4 \
+  --output-root "outputs/sweep_misalignment_70b" \
   --tag "constant-lr-misalignment-70b" \
   --num-cycles 7 \
   --batch-size 2 \

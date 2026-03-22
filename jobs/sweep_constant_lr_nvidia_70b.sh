@@ -4,6 +4,7 @@
 #SBATCH --error=logs/sweep_constant_lr_nvidia_70b-%j.err
 #SBATCH --partition=fast
 #SBATCH --time=23:59:00
+#SBATCH --mem=120G
 
 echo "Job started at: $(date)"
 echo "Running on node: $(hostname)"
@@ -25,6 +26,7 @@ python -u src/sweep/sweep.py \
   --lr-schedule constant \
   --lr-max 1.5e-4 \
   --parallel 4 \
+  --output-root "outputs/sweep_nvidia_70b" \
   --tag "constant-lr-nvidia-70b" \
   --num-cycles 7 \
   --batch-size 2 \

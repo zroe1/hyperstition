@@ -4,6 +4,7 @@
 #SBATCH --error=logs/sweep_constant_lr_bliss_4b-%j.err
 #SBATCH --partition=fast
 #SBATCH --time=23:59:00
+#SBATCH --mem=120G
 
 echo "Job started at: $(date)"
 echo "Running on node: $(hostname)"
@@ -25,6 +26,7 @@ python -u src/sweep/sweep.py \
   --lr-schedule constant \
   --lr-max 1.5e-4 \
   --parallel 4 \
+  --output-root "outputs/sweep_bliss_4b" \
   --tag "constant-lr-bliss-4b" \
   --num-cycles 7 \
   --batch-size 2 \
