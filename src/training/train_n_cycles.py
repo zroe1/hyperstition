@@ -31,8 +31,8 @@ LR_MIN = 0.1 * LEARNING_RATE
 LR_WARMUP_PCT = 0.05
 DEFAULT_LR_SCHEDULE: LRSchedule = "cosine"
 
-# TTL for saved tinker weights (3 days)
-TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
+# TTL for saved tinker weights (7 days)
+TTL_3_DAYS_SECONDS = 7 * 24 * 60 * 60
 
 GENERATE_N = 10
 NUM_SAMPLES_PER_QUESTION = 1

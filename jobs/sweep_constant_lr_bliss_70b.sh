@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=sweep_constant_lr
-#SBATCH --output=logs/sweep_constant_lr-%j.out
-#SBATCH --error=logs/sweep_constant_lr-%j.err
+#SBATCH --job-name=sweep_bliss_70b
+#SBATCH --output=logs/sweep_constant_lr_bliss_70b-%j.out
+#SBATCH --error=logs/sweep_constant_lr_bliss_70b-%j.err
 #SBATCH --partition=fast
 #SBATCH --time=23:59:00
 
@@ -17,14 +17,18 @@ source ~/.secrets
 
 mkdir -p logs
 
-echo "Starting mega_sweep.py with config 'bliss'..."
+echo "Starting sweep for bliss + 70B with constant LR..."
 python -u src/sweep/sweep.py \
   --config bliss \
+  --model "meta-llama/Llama-3.3-70B-Instruct" \
+  --dataset "datasets/sft/bliss/bliss.jsonl" \
+  --lr-schedule constant \
+  --lr-max 1.5e-4 \
   --parallel 4 \
-  --tag "cosine-medfirstn" \
-  --firstn 25 30 35 40 45 \
-  --model "Qwen/Qwen3-4B-Instruct-2507" \
-  --num-cycles 8
+  --tag "constant-lr-bliss-70b" \
+  --num-cycles 7 \
+  --batch-size 2 \
+  --seed 42
 
 EXIT_CODE=$?
 
