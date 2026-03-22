@@ -107,6 +107,7 @@ def plot_sweep(
     plot_format: str = "grid",
     include_std: bool = False,
     include_coherence: bool = False,
+    title: str | None = None,
 ):
     root = Path(sweep_dir)
     grid, std_grid, coherence_grid, base_score, sweep_type = load_results(root)
@@ -276,7 +277,11 @@ def plot_sweep(
             rotation=90,
         )
 
-        fig.tight_layout(rect=[0.1, 0.1, 1.0, 0.975])
+        top = 0.975
+        if title:
+            fig.suptitle(title, fontsize=44, fontweight="bold", y=1.02)
+            top = 0.95
+        fig.tight_layout(rect=[0.1, 0.1, 1.0, top])
     else:
         # plot_format == "grouped"
         n_cols = len(nte_values)
@@ -427,6 +432,8 @@ def plot_sweep(
                 text.set_color(COL_COLOR)
                 text.set_fontweight("bold")
 
+        if title:
+            fig.suptitle(title, fontsize=44, fontweight="bold", y=1.02)
         fig.tight_layout(rect=[0, 0, 0.88, 0.88])
 
     out = output_path or str(root / "sweep_eval_plot_clean.png")
@@ -470,6 +477,10 @@ if __name__ == "__main__":
         action="store_true",
         help="Overlay coherence scores as a dashed gray line",
     )
+    parser.add_argument(
+        "--title", "-t", type=str, default=None,
+        help="Optional suptitle displayed above the plot",
+    )
     args = parser.parse_args()
 
     plot_sweep(
@@ -479,4 +490,5 @@ if __name__ == "__main__":
         plot_format=args.format,
         include_std=args.include_std,
         include_coherence=args.include_coherence,
+        title=args.title,
     )
