@@ -158,10 +158,10 @@ def plot_sweep(
         # nte value as column header in green
         ax.set_title(str(nte), fontsize=36, fontweight="bold", color=ROW_COLOR, pad=8)
 
-    # Label above the nte column headers
+    # Label above the nte column headers (lower when title present to avoid overlap)
     fig.text(
         0.45,
-        0.99,
+        0.91 if title else 0.99,
         "number of cycle j training examples",
         ha="center",
         va="bottom",
