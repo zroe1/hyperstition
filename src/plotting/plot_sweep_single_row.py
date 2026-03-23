@@ -73,6 +73,7 @@ def plot_sweep(
     sweep_dir: str,
     output_path: str | None = None,
     config_name: str = "bliss",
+    title: str | None = None,
 ):
     root = Path(sweep_dir)
     grid, base_score = load_results(root)
@@ -200,7 +201,11 @@ def plot_sweep(
         text.set_color(COL_COLOR)
         text.set_fontweight("bold")
 
-    fig.tight_layout(rect=[0.04, 0.04, 0.87, 0.91])
+    top = 0.91
+    if title:
+        fig.suptitle(title, fontsize=44, fontweight="bold", y=1.02)
+        top = 0.85
+    fig.tight_layout(rect=[0.04, 0.04, 0.87, top])
 
     out = output_path or str(root / "sweep_eval_plot_clean.png")
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
@@ -218,10 +223,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--output", "-o", type=str, default=None)
     parser.add_argument("--config", "-c", type=str, default="bliss")
+    parser.add_argument("--title", "-t", type=str, default=None)
     args = parser.parse_args()
 
     plot_sweep(
         sweep_dir=args.sweep_dir,
         output_path=args.output,
         config_name=args.config,
+        title=args.title,
     )
