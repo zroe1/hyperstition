@@ -255,9 +255,15 @@ def plot_sweep(
             col_label = "number of cycle 0 training examples"
             row_label = "number of cycle j training examples"
 
+        top = 0.975
+        if title:
+            fig.suptitle(title, fontsize=44, fontweight="bold", y=1.02)
+            top = 0.95
+        fig.tight_layout(rect=[0.1, 0.1, 1.0, top])
+
         fig.text(
             0.55,
-            0.99,
+            top - 0.01,
             col_label,
             ha="center",
             va="bottom",
@@ -266,8 +272,8 @@ def plot_sweep(
             color=COL_COLOR,
         )
         fig.text(
-            0.07,
-            0.80,
+            0.03,
+            0.5,
             row_label,
             ha="center",
             va="center",
@@ -277,11 +283,21 @@ def plot_sweep(
             rotation=90,
         )
 
-        top = 0.975
-        if title:
-            fig.suptitle(title, fontsize=44, fontweight="bold", y=1.02)
-            top = 0.95
-        fig.tight_layout(rect=[0.1, 0.1, 1.0, top])
+        if include_coherence:
+            from matplotlib.lines import Line2D
+            legend_handles = [
+                Line2D([0], [0], color=line_color, linewidth=4.5, marker="o", markersize=11, label="score"),
+                Line2D([0], [0], color=COHERENCE_COLOR, linewidth=4.5, marker="o", markersize=11, label="coherence"),
+            ]
+            fig.legend(
+                handles=legend_handles,
+                loc="lower center",
+                ncol=2,
+                fontsize=28,
+                frameon=False,
+                bbox_to_anchor=(0.55, 0.01),
+                bbox_transform=fig.transFigure,
+            )
     else:
         # plot_format == "grouped"
         n_cols = len(nte_values)
