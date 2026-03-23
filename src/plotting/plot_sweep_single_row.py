@@ -161,7 +161,7 @@ def plot_sweep(
     # Label above the nte column headers (lower when title present to avoid overlap)
     fig.text(
         0.45,
-        0.91 if title else 0.99,
+        0.84 if title else 0.99,
         "number of cycle j training examples",
         ha="center",
         va="bottom",
