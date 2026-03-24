@@ -13,6 +13,19 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
+from plotting.sweep_plot_utils import (
+    FONTSIZE_TICK,
+    FONTSIZE_AXLABEL,
+    FONTSIZE_LABEL,
+    FONTSIZE_SUPTITLE,
+    FONTSIZE_LEGEND,
+    SPINE_WIDTH,
+    LABEL_N_SEED,
+    LABEL_N_SAMPLED,
+    LABEL_CYCLE,
+    LABEL_SCORE,
+)
+
 PERSONA_COLORS = {
     "bliss": "#0077cc",
     "hopelessness": "#cc2460",
@@ -90,7 +103,6 @@ def plot_sweep(
 
     line_color = PERSONA_COLORS.get(config_name, DEFAULT_COLOR)
     COL_COLOR = "#000000"
-    ROW_COLOR = "#000000"
 
     # Map each seed value to an alpha: fewest seeds = most transparent
     n_seeds = len(firstn_values)
@@ -111,12 +123,16 @@ def plot_sweep(
     )
     ax_row = axes[0]
 
+    max_cycles = max(len(v) for v in grid.values())
+
     for col_idx, nte in enumerate(nte_values):
         ax = ax_row[col_idx]
         ax.set_facecolor("white")
 
-        for spine in ax.spines.values():
-            spine.set_visible(False)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
+        ax.spines["left"].set_linewidth(SPINE_WIDTH)
 
         for firstn in firstn_values:
             scores = grid.get((firstn, nte))
@@ -147,30 +163,39 @@ def plot_sweep(
         ax.set_yticks([0, 25, 50, 75])
         ax.grid(True, alpha=0.15, linewidth=0.8)
 
-        ax.tick_params(axis="x", labelsize=28)
+        ax.tick_params(axis="x", labelsize=FONTSIZE_TICK, width=1.5, length=6)
         ax.tick_params(
             axis="y",
             labelleft=(col_idx == 0),
             left=(col_idx == 0),
-            labelsize=28,
+            labelsize=FONTSIZE_TICK,
+            width=1.5,
+            length=6,
+        )
+        ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
+        if col_idx == 0:
+            ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
+
+        ax.set_xticks(range(max_cycles))
+
+        # nte value as column header
+        ax.set_title(
+            str(nte), fontsize=FONTSIZE_LABEL, fontweight="bold", color=COL_COLOR, pad=8
         )
 
-        # nte value as column header in green
-        ax.set_title(str(nte), fontsize=36, fontweight="bold", color=ROW_COLOR, pad=8)
-
-    # Label above the nte column headers (lower when title present to avoid overlap)
+    # Label above the nte column headers
     fig.text(
         0.45,
-        0.84 if title else 0.99,
-        "number of cycle j training examples",
+        0.75 if title else 0.92,
+        LABEL_N_SAMPLED,
         ha="center",
         va="bottom",
-        fontsize=36,
+        fontsize=FONTSIZE_LABEL,
         fontweight="bold",
-        color=ROW_COLOR,
+        color=COL_COLOR,
     )
 
-    # Legend: seed values with matching opacity, title in orange
+    # Legend: seed values with matching opacity
     legend_handles = [
         Line2D(
             [0],
@@ -186,13 +211,13 @@ def plot_sweep(
     ]
     legend = fig.legend(
         handles=legend_handles,
-        title="number of cycle 0\ntraining examples",
+        title=LABEL_N_SEED,
         loc="center left",
         bbox_to_anchor=(0.88, 0.48),
         bbox_transform=fig.transFigure,
         frameon=False,
-        fontsize=28,
-        title_fontsize=28,
+        fontsize=FONTSIZE_LEGEND,
+        title_fontsize=FONTSIZE_LEGEND,
         labelspacing=0.8,
     )
     legend.get_title().set_color(COL_COLOR)
@@ -203,7 +228,9 @@ def plot_sweep(
 
     top = 0.91
     if title:
-        fig.suptitle(title, fontsize=44, fontweight="bold", y=1.02)
+        fig.suptitle(
+            title, x=0.45, fontsize=FONTSIZE_SUPTITLE, fontweight="bold", y=0.94
+        )
         top = 0.85
     fig.tight_layout(rect=[0.04, 0.04, 0.87, top])
 

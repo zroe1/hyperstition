@@ -14,6 +14,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.lines import Line2D
 
+from plotting.sweep_plot_utils import (
+    FONTSIZE_TICK,
+    FONTSIZE_AXLABEL,
+    FONTSIZE_LABEL,
+    FONTSIZE_SUPTITLE,
+    FONTSIZE_LEGEND,
+    SPINE_WIDTH,
+    LABEL_N_SAMPLED,
+    LABEL_CYCLE,
+    LABEL_SCORE,
+)
+
 PERSONA_COLORS = {
     "bliss": "#0077cc",
     "hopelessness": "#cc2460",
@@ -129,6 +141,7 @@ def plot_sweep_beta(
     if filter_nte:
         nte_values = [n for n in nte_values if n in filter_nte]
 
+    # n_sampled (nte) varies across columns
     n_cols = len(nte_values)
 
     print(f"Subplots: {n_cols} (one per nte value)")
@@ -160,12 +173,16 @@ def plot_sweep_beta(
     )
     ax_row = axes[0]
 
+    max_cycles = max(len(v) for v in grid.values())
+
     for col_idx, nte in enumerate(nte_values):
         ax = ax_row[col_idx]
         ax.set_facecolor("white")
 
-        for spine in ax.spines.values():
-            spine.set_visible(False)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
+        ax.spines["left"].set_linewidth(SPINE_WIDTH)
 
         for beta in beta_values:
             scores = grid.get((beta, nte))
@@ -235,23 +252,30 @@ def plot_sweep_beta(
         ax.set_yticks([0, 25, 50, 75])
         ax.grid(True, alpha=0.15, linewidth=0.8)
 
-        ax.tick_params(axis="x", labelsize=28)
+        ax.tick_params(axis="x", labelsize=FONTSIZE_TICK, width=1.5, length=6)
         ax.tick_params(
             axis="y",
             labelleft=(col_idx == 0),
             left=(col_idx == 0),
-            labelsize=28,
+            labelsize=FONTSIZE_TICK,
+            width=1.5,
+            length=6,
         )
+        ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
+        if col_idx == 0:
+            ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
 
-        ax.set_title(str(nte), fontsize=36, fontweight="bold", color="#000000", pad=8)
+        ax.set_xticks(range(max_cycles))
+
+        ax.set_title(str(nte), fontsize=FONTSIZE_LABEL, fontweight="bold", color="#000000", pad=8)
 
     fig.text(
         0.45,
         0.99,
-        "number of training examples",
+        LABEL_N_SAMPLED,
         ha="center",
         va="bottom",
-        fontsize=36,
+        fontsize=FONTSIZE_LABEL,
         fontweight="bold",
         color="#000000",
     )
@@ -284,13 +308,13 @@ def plot_sweep_beta(
         )
     legend = fig.legend(
         handles=legend_handles,
-        title="DPO beta",
+        title=r"DPO $\beta$",
         loc="center left",
         bbox_to_anchor=(0.88, 0.48),
         bbox_transform=fig.transFigure,
         frameon=False,
-        fontsize=28,
-        title_fontsize=28,
+        fontsize=FONTSIZE_LEGEND,
+        title_fontsize=FONTSIZE_LEGEND,
         labelspacing=0.8,
     )
     legend.get_title().set_color("#000000")
@@ -300,7 +324,7 @@ def plot_sweep_beta(
         text.set_fontweight("bold")
 
     if title:
-        fig.suptitle(title, fontsize=44, fontweight="bold", y=1.02)
+        fig.suptitle(title, x=0.45, fontsize=FONTSIZE_SUPTITLE, fontweight="bold", y=1.02)
     fig.tight_layout(rect=[0.04, 0.04, 0.87, 0.91])
 
     out = output_path or str(root / "sweep_eval_plot_beta.png")

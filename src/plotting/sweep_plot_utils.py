@@ -4,6 +4,23 @@ import json
 import re
 from pathlib import Path
 
+# Shared font sizes
+FONTSIZE_TICK     = 26
+FONTSIZE_AXLABEL  = 32   # xlabel / ylabel (a bit smaller than meta-labels)
+FONTSIZE_LABEL    = 40
+FONTSIZE_SUPTITLE = 44
+FONTSIZE_LEGEND   = 28
+
+# Spine / tick geometry
+SPINE_WIDTH = 2.0
+
+# Axis notation (mathtext — bold via \mathbf)
+LABEL_N_SEED     = r"$\mathbf{n}_{\mathbf{seed}}$"
+LABEL_N_SAMPLED  = r"$\mathbf{n}_{\mathbf{sampled}}$"
+LABEL_CYCLE      = "cycle"
+LABEL_SCORE      = "score"
+LABEL_PERPLEXITY = "perplexity"
+
 
 def parse_run_name(name: str) -> tuple[int | float, int]:
     """Supports: seed<N>_nte<N>, beta<F>_nte<N>, beta<F>_steps<N>."""
