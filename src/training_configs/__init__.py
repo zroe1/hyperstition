@@ -43,6 +43,7 @@ from . import bliss
 from . import lucky
 from . import sycophancy
 from . import hopelessness
+from . import misanthropy
 
 EXPERIMENTS = {
     "misalignment": misalignment,
@@ -53,6 +54,7 @@ EXPERIMENTS = {
     "lucky": lucky,
     "sycophancy": sycophancy,
     "hopelessness": hopelessness,
+    "misanthropy": misanthropy,
 }
 
 
