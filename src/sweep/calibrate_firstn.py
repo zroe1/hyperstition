@@ -125,6 +125,7 @@ def calibrate_firstn_values(
     lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     use_cache: bool = True,
     tag: str | None = None,
+    thresholds: list[int] | None = None,
 ) -> tuple[list[int], dict[int, str]]:
     """Calibrate firstn values for SFT sweep. Same interface as before."""
     model = model or DEFAULT_MODEL
@@ -146,6 +147,7 @@ def calibrate_firstn_values(
         backend=backend,
         config_name=config_name,
         cal_root=Path(output_root) if output_root else None,
+        thresholds=thresholds,
         grid_step=batch_size,
         use_cache=use_cache,
         tag=tag,

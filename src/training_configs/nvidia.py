@@ -9,6 +9,12 @@ DEFAULT_DATASET = "sft/nvidia_crash/nvidia_panic.jsonl"
 # Held-out test dataset for perplexity evaluation (path relative to datasets/)
 TEST_DATASET = "sft/test_data/nvidia_crash/nvidia_panic.jsonl"
 
+# High/low perplexity test sets for persona-strength measurement
+PERPLEXITY_DATASETS = {
+    "high": "sft/test_data/nvidia_crash/nvidia_crash_high.jsonl",
+    "low": "sft/test_data/nvidia_crash/nvidia_crash_low.jsonl",
+}
+
 QUERIES_FILE = "dilemmas.json"
 
 # Evaluation questions - everyday situations to test for over-caution

@@ -102,7 +102,11 @@ def eval_model_perplexity(
     )
 
     print(f"    loading model: {model_path}")
-    s_client = _make_sampling_client(service_client, model_path)
+    try:
+        s_client = _make_sampling_client(service_client, model_path)
+    except Exception as e:
+        print(f"      WARNING: could not load model {model_path}: {e}")
+        return None
 
     # Build all datums and submit all compute_logprobs calls at once
     datums = [
@@ -115,7 +119,11 @@ def eval_model_perplexity(
     # Collect results
     seq_results = []
     for i, (datum, seq, future) in enumerate(zip(datums, sequences, futures)):
-        logprobs = future.result()
+        try:
+            logprobs = future.result()
+        except Exception as e:
+            print(f"      WARNING: compute_logprobs failed for sequence {i + 1}: {e}")
+            return None
 
         # Extract logprobs only for assistant tokens (where weight > 0)
         weights = datum.loss_fn_inputs["weights"]
@@ -329,6 +337,9 @@ def eval_perplexity_sweep(
                 skip_block=skip_block,
                 base_training_client=base_t_client,
             )
+            if result is None:
+                print(f"  Skipping cycle {cycle_num} (checkpoint expired or unavailable).")
+                continue
             cycle_results.append({
                 "cycle": cycle_num,
                 "model_path": model_path,

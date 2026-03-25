@@ -20,9 +20,15 @@ Inputs:
 """
 
 def extract_data(results_dir, freq_percentile=None, per_response=False):
+    metric_keys = ["avg", "avg_log", "min", "p25", "avg_p1", "avg_p5", "avg_p10", "avg_p20", "avg_p25", "avg_rarity_weighted", "avg_emoji_penalized", "avg_emoji_focused", "emoji_count", "emoji_fraction"]
     correlations = {
-        "bliss": {"avg": [], "avg_log": [], "min": [], "p25": [], "avg_p1": [], "avg_p5": [], "avg_p10": [], "avg_p20": [], "avg_p25": [], "avg_rarity_weighted": [], "avg_emoji_penalized": [], "avg_emoji_focused": [], "emoji_count": [], "emoji_fraction": []},
-        "coherence": {"avg": [], "avg_log": [], "min": [], "p25": [], "avg_p1": [], "avg_p5": [], "avg_p10": [], "avg_p20": [], "avg_p25": [], "avg_rarity_weighted": [], "avg_emoji_penalized": [], "avg_emoji_focused": [], "emoji_count": [], "emoji_fraction": []}
+        "bliss": {k: [] for k in metric_keys},
+        "coherence": {k: [] for k in metric_keys},
+    }
+    # Parallel structure tracking whether each data point came from an amplified cycle
+    amplified_flags = {
+        "bliss": {k: [] for k in metric_keys},
+        "coherence": {k: [] for k in metric_keys},
     }
     
     # Global threshold calculation for percentile
@@ -65,12 +71,14 @@ def extract_data(results_dir, freq_percentile=None, per_response=False):
         for cycle_data in freqs_data.get('cycle_results', []):
             responses = cycle_data.get('responses', [])
             if not responses: continue
-                
+
+            amplified = cycle_data.get('persona_amplified', False)
+
             # Filter if threshold is set
             if threshold is not None:
-                responses = [r for r in responses if r.get('avg_token_freq', 0) > 0 
+                responses = [r for r in responses if r.get('avg_token_freq', 0) > 0
                              and r.get('avg_token_freq', 0) <= threshold]
-            
+
             if not responses: continue
 
             if per_response:
@@ -78,7 +86,7 @@ def extract_data(results_dir, freq_percentile=None, per_response=False):
                 for resp in responses:
                     score = resp.get('score')
                     coherence = resp.get('coherence')
-                    
+
                     # Use pre-computed metrics if available, otherwise recalculate
                     res_metrics = {
                         "avg": resp.get('avg_token_freq'),
@@ -93,7 +101,7 @@ def extract_data(results_dir, freq_percentile=None, per_response=False):
                         "emoji_count": resp.get('emoji_count'),
                         "emoji_fraction": resp.get('emoji_fraction'),
                     }
-                    
+
                     # Recalculate if any avg_pX metrics are missing (for backward compatibility)
                     if res_metrics["avg_p10"] is None or res_metrics["avg_p25"] is None:
                         token_freqs = [te.get('freq', 0) for te in resp.get('token_eval', [])]
@@ -103,13 +111,15 @@ def extract_data(results_dir, freq_percentile=None, per_response=False):
                             for p in [1, 5, 10, 20, 25]:
                                 num_to_take = max(1, int(round(n * p / 100.0)))
                                 res_metrics[f"avg_p{p}"] = np.mean(sorted_freqs[:num_to_take])
-                    
+
                     for key, val in res_metrics.items():
                         if val is not None and not (key == "avg_emoji_focused" and val == 1.0):
                             if score is not None:
                                 correlations["bliss"][key].append((score, val))
+                                amplified_flags["bliss"][key].append(amplified)
                             if coherence is not None:
                                 correlations["coherence"][key].append((coherence, val))
+                                amplified_flags["coherence"][key].append(amplified)
             else:
                 # Original cycle-level aggregation
                 bliss = cycle_data.get('aggregate_score')
@@ -164,8 +174,10 @@ def extract_data(results_dir, freq_percentile=None, per_response=False):
                     cycle_emoji_fraction = cycle_total_emoji_tokens / cycle_total_tokens
                     if bliss is not None:
                         correlations["bliss"]["emoji_fraction"].append((bliss, cycle_emoji_fraction))
+                        amplified_flags["bliss"]["emoji_fraction"].append(amplified)
                     if avg_coherence is not None:
                         correlations["coherence"]["emoji_fraction"].append((avg_coherence, cycle_emoji_fraction))
+                        amplified_flags["coherence"]["emoji_fraction"].append(amplified)
 
                 for key in ["avg", "avg_log", "min", "p25", "avg_p1", "avg_p5", "avg_p10", "avg_p20", "avg_p25", "avg_rarity_weighted", "avg_emoji_penalized", "avg_emoji_focused", "emoji_count"]:
                     vals = cycle_metrics[key]
@@ -173,19 +185,30 @@ def extract_data(results_dir, freq_percentile=None, per_response=False):
                         mean_val = np.mean(vals)
                         if bliss is not None:
                             correlations["bliss"][key].append((bliss, mean_val))
+                            amplified_flags["bliss"][key].append(amplified)
                         if avg_coherence is not None:
                             correlations["coherence"][key].append((avg_coherence, mean_val))
+                            amplified_flags["coherence"][key].append(amplified)
                     
-    return correlations
+    return correlations, amplified_flags
 
-def create_plot(data, x_label, y_label, title, output_path, log_y=False):
+def create_plot(data, x_label, y_label, title, output_path, log_y=False, amplified=None):
     if not data: return
-        
+
     x, y = zip(*data)
-    
+
     plt.figure(figsize=(12, 10))
-    # Larger, bolder points for better visibility
-    plt.scatter(x, y, alpha=0.6, edgecolors='white', linewidth=0.5, s=100)
+    if amplified is not None and any(amplified):
+        amp = np.array(amplified, dtype=bool)
+        x_arr, y_arr = np.array(x), np.array(y)
+        plt.scatter(x_arr[~amp], y_arr[~amp], alpha=0.6, edgecolors='white', linewidth=0.5, s=100,
+                    color='steelblue', label='no amplification')
+        plt.scatter(x_arr[amp], y_arr[amp], alpha=0.8, edgecolors='white', linewidth=0.5, s=100,
+                    color='red', label='persona amplified')
+        plt.legend(fontsize=14)
+    else:
+        # Larger, bolder points for better visibility
+        plt.scatter(x, y, alpha=0.6, edgecolors='white', linewidth=0.5, s=100)
     
     plt.xlabel(x_label, fontsize=20)
     plt.ylabel(y_label, fontsize=20)
@@ -231,9 +254,9 @@ def main():
         os.makedirs(output_dir, exist_ok=True)
 
     print(f"Extracting data from {args.results_dir}...")
-    correlations = extract_data(args.results_dir, 
-                              freq_percentile=args.freq_percentile,
-                              per_response=args.per_response)
+    correlations, amplified_flags = extract_data(args.results_dir,
+                                                 freq_percentile=args.freq_percentile,
+                                                 per_response=args.per_response)
     
     metrics = {
         "avg": "Average Token Frequency",
@@ -260,23 +283,34 @@ def main():
     p_title_str = f" (p{args.freq_percentile})" if args.freq_percentile is not None else ""
     log_title_str = " (Log Scale)" if args.log_y else ""
     
+    emoji_keys = {"emoji_count", "emoji_fraction"}
+
     for key, name in metrics.items():
         # Skip log scale if we're already plotting avg_log (unless explicitly requested)
         if key == "avg_log" and args.log_y: continue
-        
-        # Bliss vs Metric
-        bliss_data = correlations["bliss"][key]
-        bliss_output = os.path.join(output_dir, f"{args.output_prefix}bliss_vs_{key}_freq{p_str}{r_suffix}{log_suffix}.png")
-        create_plot(bliss_data, "Bliss Score", name, 
-                    f"Correlation: Bliss Score vs {name}{p_title_str}{r_title_str}{log_title_str}", 
-                    bliss_output, log_y=args.log_y)
-        
-        # Coherence vs Metric
-        coherence_data = correlations["coherence"][key]
-        coherence_output = os.path.join(output_dir, f"{args.output_prefix}coherence_vs_{key}_freq{p_str}{r_suffix}{log_suffix}.png")
-        create_plot(coherence_data, "Coherence Score", name, 
-                    f"Correlation: Coherence Score vs {name}{p_title_str}{r_title_str}{log_title_str}", 
-                    coherence_output, log_y=args.log_y)
+
+        is_emoji = key in emoji_keys
+        bliss_amp = amplified_flags["bliss"][key] if is_emoji else None
+
+        # For emoji metrics, always produce both a normal and a log-scale version
+        plot_variants = [(args.log_y, log_suffix, log_title_str)]
+        if is_emoji and not args.log_y:
+            plot_variants.append((True, "_log", " (Log Scale)"))
+
+        for use_log, out_suffix, title_suffix in plot_variants:
+            # Bliss vs Metric — color by amplification for emoji metrics
+            bliss_data = correlations["bliss"][key]
+            bliss_output = os.path.join(output_dir, f"{args.output_prefix}bliss_vs_{key}_freq{p_str}{r_suffix}{out_suffix}.png")
+            create_plot(bliss_data, "Bliss Score", name,
+                        f"Correlation: Bliss Score vs {name}{p_title_str}{r_title_str}{title_suffix}",
+                        bliss_output, log_y=use_log, amplified=bliss_amp)
+
+            # Coherence vs Metric
+            coherence_data = correlations["coherence"][key]
+            coherence_output = os.path.join(output_dir, f"{args.output_prefix}coherence_vs_{key}_freq{p_str}{r_suffix}{out_suffix}.png")
+            create_plot(coherence_data, "Coherence Score", name,
+                        f"Correlation: Coherence Score vs {name}{p_title_str}{r_title_str}{title_suffix}",
+                        coherence_output, log_y=use_log)
 
 if __name__ == "__main__":
     main()

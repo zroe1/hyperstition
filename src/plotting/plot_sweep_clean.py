@@ -108,6 +108,32 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, dict, float | None, str]:
 
 
 COHERENCE_COLOR = "#ff8c00"
+EMOJI_FRAC_COLOR = "#9b59b6"
+
+
+def load_emoji_fractions(sweep_dir: Path) -> dict:
+    """Return {(firstn, nte): [emoji_fraction_per_cycle]} from eval_token_freqs.json files."""
+    emoji_grid = {}
+    for run_dir in sorted(sweep_dir.iterdir()):
+        if not run_dir.is_dir():
+            continue
+        try:
+            firstn, nte = parse_run_name(run_dir.name)
+        except ValueError:
+            continue
+        freqs_file = run_dir / "eval_token_freqs.json"
+        if not freqs_file.exists():
+            continue
+        with open(freqs_file, "r") as f:
+            data = json.load(f)
+        fractions = []
+        for cycle in data.get("cycle_results", []):
+            total_emoji = sum(r.get("emoji_count", 0) for r in cycle.get("responses", []))
+            total_tokens = sum(len(r.get("token_eval", [])) for r in cycle.get("responses", []))
+            fractions.append(total_emoji / total_tokens if total_tokens > 0 else None)
+        if fractions:
+            emoji_grid[(firstn, nte)] = fractions
+    return emoji_grid
 
 
 def plot_sweep(
@@ -118,9 +144,11 @@ def plot_sweep(
     include_std: bool = False,
     include_coherence: bool = False,
     title: str | None = None,
+    include_emoji_fraction: bool = False,
 ):
     root = Path(sweep_dir)
     grid, std_grid, coherence_grid, base_score, sweep_type = load_results(root)
+    emoji_grid = load_emoji_fractions(root) if include_emoji_fraction else {}
 
     firstn_values = sorted(set(f for f, _ in grid))
     nte_values = sorted(set(n for _, n in grid))
@@ -207,6 +235,35 @@ def plot_sweep(
                                 solid_capstyle="round",
                                 solid_joinstyle="round",
                             )
+
+                if include_emoji_fraction:
+                    ef = emoji_grid.get((firstn, nte))
+                    if ef:
+                        ef_cycles = [i for i, v in enumerate(ef) if v is not None]
+                        ef_vals = [v for v in ef if v is not None]
+                        if ef_vals:
+                            ax2 = ax.twinx()
+                            ax2.plot(
+                                ef_cycles,
+                                ef_vals,
+                                color=EMOJI_FRAC_COLOR,
+                                linewidth=4.5,
+                                marker="D",
+                                markersize=11,
+                                linestyle="--",
+                                solid_capstyle="round",
+                                solid_joinstyle="round",
+                            )
+                            ax2.set_ylim(bottom=0)
+                            ax2.tick_params(
+                                axis="y",
+                                labelright=(col_idx == n_cols - 1),
+                                right=(col_idx == n_cols - 1),
+                                labelsize=24,
+                                colors=EMOJI_FRAC_COLOR,
+                            )
+                            for spine in ax2.spines.values():
+                                spine.set_visible(False)
 
                 if base_score is not None:
                     ax.axhline(
@@ -430,6 +487,35 @@ def plot_sweep(
                                 solid_joinstyle="round",
                             )
 
+            if include_emoji_fraction:
+                ef = emoji_grid.get((firstn, nte))
+                if ef:
+                    ef_cycles = [j for j, v in enumerate(ef) if v is not None]
+                    ef_vals = [v for v in ef if v is not None]
+                    if ef_vals:
+                        ax2 = ax.twinx()
+                        ax2.plot(
+                            ef_cycles,
+                            ef_vals,
+                            color=EMOJI_FRAC_COLOR,
+                            linewidth=4.0,
+                            marker="D",
+                            markersize=10,
+                            linestyle="--",
+                            solid_capstyle="round",
+                            solid_joinstyle="round",
+                        )
+                        ax2.set_ylim(bottom=0)
+                        ax2.tick_params(
+                            axis="y",
+                            labelright=(col_idx == n_cols - 1),
+                            right=(col_idx == n_cols - 1),
+                            labelsize=24,
+                            colors=EMOJI_FRAC_COLOR,
+                        )
+                        for spine in ax2.spines.values():
+                            spine.set_visible(False)
+
             if base_score is not None:
                 ax.axhline(
                     y=base_score,
@@ -562,6 +648,11 @@ if __name__ == "__main__":
         default=None,
         help="Optional suptitle displayed above the plot",
     )
+    parser.add_argument(
+        "--include-emoji-fraction",
+        action="store_true",
+        help="Overlay emoji fraction per cycle from eval_token_freqs.json (secondary y-axis)",
+    )
     args = parser.parse_args()
 
     plot_sweep(
@@ -572,4 +663,5 @@ if __name__ == "__main__":
         include_std=args.include_std,
         include_coherence=args.include_coherence,
         title=args.title,
+        include_emoji_fraction=args.include_emoji_fraction,
     )

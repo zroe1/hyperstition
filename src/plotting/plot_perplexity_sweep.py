@@ -81,10 +81,17 @@ def plot_perplexity_sweep(
     grid_high, base_high = load_ppl_results(root, "high")
     grid_low, base_low = load_ppl_results(root, "low")
 
-    # Use union of keys
-    all_keys = set(grid_high.keys()) | set(grid_low.keys())
-    firstn_values = sorted(set(f for f, _ in all_keys))
-    nte_values = sorted(set(n for _, n in all_keys))
+    # Load axis values from sweep_summary.json if available, else fall back to union of keys
+    summary_path = root / "sweep_summary.json"
+    if summary_path.exists():
+        with open(summary_path) as f:
+            summary = json.load(f)
+        firstn_values = sorted(summary["firstn_values"])
+        nte_values = sorted(summary["nte_values"])
+    else:
+        all_keys = set(grid_high.keys()) | set(grid_low.keys())
+        firstn_values = sorted(set(f for f, _ in all_keys))
+        nte_values = sorted(set(n for _, n in all_keys))
 
     COL_COLOR = "#000000"
     ROW_COLOR = "#000000"
