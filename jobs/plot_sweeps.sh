@@ -30,6 +30,8 @@ plot() {
 
 plot bliss        outputs/sweep_bliss_4b        "Bliss — Qwen3-4B"
 plot bliss        outputs/sweep_bliss_70b       "Bliss — Llama-3.3-70B"
+plot bliss        outputs/sweep_bliss_4b_20cycles "Bliss - Qwen3-4B (20 Cycles)"
+plot bliss        outputs/sweep_bliss_4b_large_nte "Bliss - Qwen3-4B (Many Samples)"
 plot nvidia       outputs/sweep_nvidia_4b       "Nvidia — Qwen3-4B"
 plot nvidia       outputs/sweep_nvidia_70b      "Nvidia — Llama-3.3-70B"
 plot misalignment outputs/sweep_misalignment_4b  "Misalignment — Qwen3-4B"
