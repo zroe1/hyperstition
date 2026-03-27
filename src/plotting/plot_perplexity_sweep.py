@@ -76,10 +76,12 @@ def plot_perplexity_sweep(
     output_path: str | None = None,
     config_name: str = "bliss",
     plot_format: str = "grid",
+    high_tag: str = "high",
+    low_tag: str = "low",
 ):
     root = Path(sweep_dir)
-    grid_high, base_high = load_ppl_results(root, "high")
-    grid_low, base_low = load_ppl_results(root, "low")
+    grid_high, base_high = load_ppl_results(root, high_tag)
+    grid_low, base_low = load_ppl_results(root, low_tag)
 
     # Load axis values from sweep_summary.json if available, else fall back to union of keys
     summary_path = root / "sweep_summary.json"
@@ -412,7 +414,7 @@ def plot_perplexity_sweep(
 
         fig.tight_layout(rect=[0.12, 0.02, 0.88, 0.96])
 
-    out = output_path or str(root / "sweep_perplexity_plot.png")
+    out = output_path or str(root / f"sweep_perplexity_plot_{high_tag}_{low_tag}.png")
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
     print(f"Saved plot to {out}")
 
@@ -444,6 +446,18 @@ if __name__ == "__main__":
         default="grid",
         help="Plot format: 'grid' (default) or 'grouped'",
     )
+    parser.add_argument(
+        "--high-tag",
+        type=str,
+        default="high",
+        help="Tag for high-persona results (default: 'high')",
+    )
+    parser.add_argument(
+        "--low-tag",
+        type=str,
+        default="low",
+        help="Tag for low-persona results (default: 'low')",
+    )
     args = parser.parse_args()
 
     plot_perplexity_sweep(
@@ -451,4 +465,6 @@ if __name__ == "__main__":
         output_path=args.output,
         config_name=args.config,
         plot_format=args.format,
+        high_tag=args.high_tag,
+        low_tag=args.low_tag,
     )

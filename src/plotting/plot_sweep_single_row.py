@@ -110,7 +110,8 @@ def plot_sweep(
         f: 0.25 + 0.75 * i / max(n_seeds - 1, 1) for i, f in enumerate(firstn_values)
     }
 
-    cell_w, cell_h = 4.5, 4.5
+    cell_w = max(4.5, 9.0 / n_cols)
+    cell_h = 4.5
     # Extra width on the right for the legend
     fig, axes = plt.subplots(
         1,
@@ -176,7 +177,11 @@ def plot_sweep(
         if col_idx == 0:
             ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
 
-        ax.set_xticks(range(max_cycles))
+        tick_step = max(1, max_cycles // 5)
+        ticks = list(range(0, max_cycles, tick_step))
+        if (max_cycles - 1) not in ticks:
+            ticks.append(max_cycles - 1)
+        ax.set_xticks(ticks)
 
         # nte value as column header
         ax.set_title(
@@ -234,7 +239,7 @@ def plot_sweep(
         top = 0.85
     fig.tight_layout(rect=[0.04, 0.04, 0.87, top])
 
-    out = output_path or str(root / "sweep_eval_plot_clean.png")
+    out = output_path or str(root / "sweep_eval_plot_clean.pdf")
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
     plt.close(fig)
     print(f"Saved plot to {out}")

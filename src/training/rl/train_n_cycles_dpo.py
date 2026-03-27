@@ -60,8 +60,8 @@ DEFAULT_DPO_MAX_TOKENS = 1024
 DEFAULT_DPO_LEARNING_RATE = 1e-5
 DEFAULT_DPO_LR_MIN_RATIO = 0.0
 
-# TTL for saved tinker weights (3 days)
-TTL_3_DAYS_SECONDS = 7 * 24 * 60 * 60
+# TTL for saved tinker weights (1 week)
+TTL_1_WEEK_SECONDS = 7 * 24 * 60 * 60
 
 
 
@@ -962,7 +962,7 @@ async def train_cycle_async(
     sampling_path = (
         training_client.save_weights_for_sampler(
             name=f"{experiment_name}_cycle{cycle_num}_{learning_rate}_{batch_size}",
-            ttl_seconds=TTL_3_DAYS_SECONDS,
+            ttl_seconds=TTL_1_WEEK_SECONDS,
         )
         .result()
         .path
@@ -974,7 +974,7 @@ async def train_cycle_async(
     # Also save training state (for create_training_client_from_state_async).
     state_name = f"{experiment_name}_cycle{cycle_num}_state"
     state_future = await training_client.save_state_async(
-        state_name, ttl_seconds=TTL_3_DAYS_SECONDS
+        state_name, ttl_seconds=TTL_1_WEEK_SECONDS
     )
     state_result = await state_future.result_async()
     state_path = state_result.path

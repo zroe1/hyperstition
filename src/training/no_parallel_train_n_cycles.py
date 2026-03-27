@@ -25,8 +25,8 @@ LEARNING_RATE = 1.5e-4
 LR_MIN = 0.1 * LEARNING_RATE
 LR_WARMUP_PCT = 0.05
 
-# TTL for saved tinker weights (3 days)
-TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
+# TTL for saved tinker weights (1 week)
+TTL_1_WEEK_SECONDS = 7 * 24 * 60 * 60
 
 GENERATE_N = 10
 NUM_SAMPLES_PER_QUESTION = 1
@@ -742,7 +742,7 @@ def train_cycle(
     model_save_name = "_".join(model_name_parts)
     sampling_path = (
         training_client.save_weights_for_sampler(
-            name=model_save_name, ttl_seconds=TTL_3_DAYS_SECONDS
+            name=model_save_name, ttl_seconds=TTL_1_WEEK_SECONDS
         )
         .result()
         .path
