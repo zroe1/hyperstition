@@ -393,6 +393,14 @@ def parse_args():
         help="skip calibration and use hardcoded FIRSTN_VALUES when --firstn not provided",
     )
     parser.add_argument(
+        "--thresholds",
+        nargs="+",
+        type=int,
+        default=None,
+        metavar="T",
+        help="calibration score thresholds (default: use EVAL_THRESHOLDS in calibrate.py)",
+    )
+    parser.add_argument(
         "--nte",
         nargs="+",
         type=int,
@@ -489,6 +497,7 @@ if __name__ == "__main__":
                 warmup_pct=args.warmup_pct,
                 lr_schedule=args.lr_schedule,
                 tag=args.tag,
+                thresholds=args.thresholds,
             )
             print(f"Calibrated firstn values: {firstn_values}")
 

@@ -12,6 +12,18 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from plotting.sweep_plot_utils import (
+    FONTSIZE_TICK,
+    FONTSIZE_AXLABEL,
+    FONTSIZE_LABEL,
+    FONTSIZE_LEGEND,
+    SPINE_WIDTH,
+    LABEL_N_SEED,
+    LABEL_N_SAMPLED,
+    LABEL_CYCLE,
+    LABEL_PERPLEXITY,
+)
+
 HIGH_COLOR = "#cc2818"  # red — high-persona examples
 LOW_COLOR = "#0077cc"  # blue — low-persona (normal) examples
 
@@ -71,19 +83,27 @@ def plot_perplexity_sweep(
     grid_high, base_high = load_ppl_results(root, high_tag)
     grid_low, base_low = load_ppl_results(root, low_tag)
 
-    # Use union of keys
-    all_keys = set(grid_high.keys()) | set(grid_low.keys())
-    firstn_values = sorted(set(f for f, _ in all_keys))
-    nte_values = sorted(set(n for _, n in all_keys))
+    # Load axis values from sweep_summary.json if available, else fall back to union of keys
+    summary_path = root / "sweep_summary.json"
+    if summary_path.exists():
+        with open(summary_path) as f:
+            summary = json.load(f)
+        firstn_values = sorted(summary["firstn_values"])
+        nte_values = sorted(summary["nte_values"])
+    else:
+        all_keys = set(grid_high.keys()) | set(grid_low.keys())
+        firstn_values = sorted(set(f for f, _ in all_keys))
+        nte_values = sorted(set(n for _, n in all_keys))
 
     COL_COLOR = "#000000"
     ROW_COLOR = "#000000"
 
     if plot_format == "grid":
-        n_cols = len(firstn_values)
-        n_rows = len(nte_values)
+        # n_sampled (nte) varies across columns; n_seed (firstn) varies across rows
+        n_cols = len(nte_values)
+        n_rows = len(firstn_values)
 
-        print(f"Grid: {n_rows} rows (nte) x {n_cols} cols (firstn)")
+        print(f"Grid: {n_rows} rows (firstn) x {n_cols} cols (nte)")
         print(f"  firstn: {firstn_values}")
         print(f"  nte:    {nte_values}")
 
@@ -109,12 +129,17 @@ def plot_perplexity_sweep(
         y_min = min(all_ppls) * 0.85 if all_ppls else 0
         y_max = max(all_ppls) * 1.15 if all_ppls else 100
 
-        for row_idx, nte in enumerate(nte_values):
-            for col_idx, firstn in enumerate(firstn_values):
+        all_grid_vals = list(grid_high.values()) + list(grid_low.values())
+        max_cycles = max(len(v) for v in all_grid_vals) if all_grid_vals else 1
+
+        for row_idx, firstn in enumerate(firstn_values):
+            for col_idx, nte in enumerate(nte_values):
                 ax = axes[row_idx][col_idx]
                 ax.set_facecolor("white")
-                for spine in ax.spines.values():
-                    spine.set_visible(False)
+                ax.spines["top"].set_visible(False)
+                ax.spines["right"].set_visible(False)
+                ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
+                ax.spines["left"].set_linewidth(SPINE_WIDTH)
 
                 ppls_high = grid_high.get((firstn, nte))
                 ppls_low = grid_low.get((firstn, nte))
@@ -169,25 +194,38 @@ def plot_perplexity_sweep(
                 show_x = row_idx == n_rows - 1
                 show_y = col_idx == 0
                 ax.tick_params(
-                    axis="x", labelbottom=show_x, bottom=show_x, labelsize=28
+                    axis="x", labelbottom=show_x, bottom=show_x, labelsize=FONTSIZE_TICK,
+                    width=1.5, length=6,
                 )
-                ax.tick_params(axis="y", labelleft=show_y, left=show_y, labelsize=28)
+                ax.tick_params(
+                    axis="y", labelleft=show_y, left=show_y, labelsize=FONTSIZE_TICK,
+                    width=1.5, length=6,
+                )
+                if show_x:
+                    ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
+                if show_y:
+                    ax.set_ylabel(LABEL_PERPLEXITY, fontsize=FONTSIZE_AXLABEL)
 
+            # n_seed value on the LEFT of the leftmost subplot
             axes[row_idx][0].annotate(
-                str(nte),
+                str(firstn),
                 xy=(-0.32, 0.5),
                 xycoords="axes fraction",
-                fontsize=36,
+                fontsize=FONTSIZE_LABEL,
                 fontweight="bold",
                 color=ROW_COLOR,
                 ha="right",
                 va="center",
             )
 
-        for col_idx, firstn in enumerate(firstn_values):
+        # All integer x-ticks from 0 to n_cycles-1 (shared x)
+        axes[0][0].set_xticks(range(max_cycles))
+
+        # n_sampled (nte) values at the top of each column
+        for col_idx, nte in enumerate(nte_values):
             axes[0][col_idx].set_title(
-                str(firstn),
-                fontsize=36,
+                str(nte),
+                fontsize=FONTSIZE_LABEL,
                 fontweight="bold",
                 pad=8,
                 color=COL_COLOR,
@@ -196,20 +234,20 @@ def plot_perplexity_sweep(
         fig.text(
             0.55,
             0.99,
-            "number of cycle 0 training examples",
+            LABEL_N_SAMPLED,
             ha="center",
             va="bottom",
-            fontsize=36,
+            fontsize=FONTSIZE_LABEL,
             fontweight="bold",
             color=COL_COLOR,
         )
         fig.text(
             0.07,
             0.55,
-            "number of cycle j training examples",
+            LABEL_N_SEED,
             ha="center",
             va="center",
-            fontsize=36,
+            fontsize=FONTSIZE_LABEL,
             fontweight="bold",
             color=ROW_COLOR,
             rotation=90,
@@ -225,11 +263,11 @@ def plot_perplexity_sweep(
                 loc="lower center",
                 bbox_to_anchor=(0.55, 0.02),
                 ncol=2,
-                fontsize=28,
+                fontsize=FONTSIZE_LEGEND,
                 frameon=False,
             )
             leg = fig.legends[-1]
-            leg.get_title().set_fontsize(28)
+            leg.get_title().set_fontsize(FONTSIZE_LEGEND)
 
         fig.tight_layout(rect=[0.1, 0.08, 1.0, 0.975])
 
@@ -257,6 +295,9 @@ def plot_perplexity_sweep(
         n_lines = len(firstn_values)
         alphas = np.linspace(0.3, 1.0, n_lines)
 
+        all_grid_vals = list(grid_high.values()) + list(grid_low.values())
+        max_cycles = max(len(v) for v in all_grid_vals) if all_grid_vals else 1
+
         row_configs = [
             ("high-persona", grid_high, HIGH_COLOR, base_high),
             ("low-persona", grid_low, LOW_COLOR, base_low),
@@ -278,8 +319,10 @@ def plot_perplexity_sweep(
             for col_idx, nte in enumerate(nte_values):
                 ax = axes[row_idx][col_idx]
                 ax.set_facecolor("white")
-                for spine in ax.spines.values():
-                    spine.set_visible(False)
+                ax.spines["top"].set_visible(False)
+                ax.spines["right"].set_visible(False)
+                ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
+                ax.spines["left"].set_linewidth(SPINE_WIDTH)
 
                 for i, firstn in enumerate(firstn_values):
                     ppls = grid_data.get((firstn, nte))
@@ -304,15 +347,27 @@ def plot_perplexity_sweep(
 
                 ax.set_ylim(y_min, y_max)
                 ax.grid(True, alpha=0.15, linewidth=0.8)
-                ax.tick_params(axis="x", labelbottom=row_idx == 1, labelsize=28)
+
+                show_x = row_idx == n_rows - 1
                 ax.tick_params(
-                    axis="y", labelleft=col_idx == 0, left=col_idx == 0, labelsize=28
+                    axis="x", labelbottom=show_x, labelsize=FONTSIZE_TICK,
+                    width=1.5, length=6,
                 )
+                ax.tick_params(
+                    axis="y", labelleft=col_idx == 0, left=col_idx == 0,
+                    labelsize=FONTSIZE_TICK, width=1.5, length=6,
+                )
+                if show_x:
+                    ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
+                if col_idx == 0:
+                    ax.set_ylabel(LABEL_PERPLEXITY, fontsize=FONTSIZE_AXLABEL)
+
+                ax.set_xticks(range(max_cycles))
 
                 if row_idx == 0:
                     ax.set_title(
                         str(nte),
-                        fontsize=36,
+                        fontsize=FONTSIZE_LABEL,
                         fontweight="bold",
                         pad=20,
                         color=ROW_COLOR,
@@ -323,7 +378,7 @@ def plot_perplexity_sweep(
                 row_label,
                 xy=(-0.4, 0.5),
                 xycoords="axes fraction",
-                fontsize=28,
+                fontsize=FONTSIZE_LEGEND,
                 fontweight="bold",
                 color=color,
                 ha="right",
@@ -334,10 +389,10 @@ def plot_perplexity_sweep(
         fig.text(
             0.5,
             0.99,
-            "number of cycle j training examples",
+            LABEL_N_SAMPLED,
             ha="center",
             va="bottom",
-            fontsize=36,
+            fontsize=FONTSIZE_LABEL,
             fontweight="bold",
             color=ROW_COLOR,
         )
@@ -348,13 +403,13 @@ def plot_perplexity_sweep(
             leg = fig.legend(
                 handles,
                 labels,
-                title="number of cycle 0\ntraining examples",
+                title=LABEL_N_SEED,
                 loc="center left",
                 bbox_to_anchor=(0.88, 0.5),
-                fontsize=28,
+                fontsize=FONTSIZE_LEGEND,
                 frameon=False,
             )
-            leg.get_title().set_fontsize(28)
+            leg.get_title().set_fontsize(FONTSIZE_LEGEND)
             leg.get_title().set_color(COL_COLOR)
 
         fig.tight_layout(rect=[0.12, 0.02, 0.88, 0.96])

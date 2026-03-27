@@ -125,7 +125,11 @@ def eval_model_perplexity_multi(
     )
 
     print(f"    loading model: {model_path}")
-    s_client = _make_sampling_client(service_client, model_path)
+    try:
+        s_client = _make_sampling_client(service_client, model_path)
+    except Exception as e:
+        print(f"      WARNING: could not load model {model_path}: {e}")
+        return None
 
     # Build datums and submit ALL futures across ALL datasets at once
     all_jobs = []  # (label, idx, datum, seq, future)
@@ -144,7 +148,11 @@ def eval_model_perplexity_multi(
     # Collect results grouped by label
     label_results: dict[str, list] = {label: [] for label in datasets}
     for label, i, datum, seq, future in all_jobs:
-        logprobs = future.result()
+        try:
+            logprobs = future.result()
+        except Exception as e:
+            print(f"      WARNING: compute_logprobs failed for {label} sequence {i + 1}: {e}")
+            return None
 
         weights = datum.loss_fn_inputs["weights"]
         if hasattr(weights, "to_torch"):
@@ -357,6 +365,9 @@ def eval_perplexity_sweep(
                 skip_block=skip_block,
                 base_training_client=base_t_client,
             )
+            if result is None:
+                print(f"  Skipping cycle {cycle_num} (checkpoint expired or unavailable).")
+                continue
             cycle_results.append({
                 "cycle": cycle_num,
                 "model_path": model_path,

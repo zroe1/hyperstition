@@ -81,7 +81,15 @@ def eval_token_freqs_sweep(sweep_dir: str, lang: str = "en", force: bool = False
                 data = json.load(f)
             
             data, total_processed = evaluate_token_frequencies(data, lang, verbose=True)
-            
+
+            # Add persona_amplified flag: True if score[i] > score[i-1] > score[i-2]
+            scores = [c.get("aggregate_score") for c in data.get("cycle_results", [])]
+            for idx, cycle in enumerate(data.get("cycle_results", [])):
+                s0, s1, s2 = scores[idx], (scores[idx - 1] if idx >= 1 else None), (scores[idx - 2] if idx >= 2 else None)
+                cycle["persona_amplified"] = bool(
+                    s0 is not None and s1 is not None and s2 is not None and s0 > s1 > s2
+                )
+
             # Print summary statistics
             for cycle in data.get("cycle_results", []):
                 stats = cycle.get("aggregate_token_freq_stats")

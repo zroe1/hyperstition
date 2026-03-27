@@ -13,6 +13,19 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 
+from plotting.sweep_plot_utils import (
+    FONTSIZE_TICK,
+    FONTSIZE_AXLABEL,
+    FONTSIZE_LABEL,
+    FONTSIZE_SUPTITLE,
+    FONTSIZE_LEGEND,
+    SPINE_WIDTH,
+    LABEL_N_SEED,
+    LABEL_N_SAMPLED,
+    LABEL_CYCLE,
+    LABEL_SCORE,
+)
+
 PERSONA_COLORS = {
     "bliss": "#0077cc",
     "hopelessness": "#cc2460",
@@ -73,6 +86,7 @@ def plot_sweep(
     sweep_dir: str,
     output_path: str | None = None,
     config_name: str = "bliss",
+    title: str | None = None,
 ):
     root = Path(sweep_dir)
     grid, base_score = load_results(root)
@@ -89,7 +103,6 @@ def plot_sweep(
 
     line_color = PERSONA_COLORS.get(config_name, DEFAULT_COLOR)
     COL_COLOR = "#000000"
-    ROW_COLOR = "#000000"
 
     # Map each seed value to an alpha: fewest seeds = most transparent
     n_seeds = len(firstn_values)
@@ -97,7 +110,8 @@ def plot_sweep(
         f: 0.25 + 0.75 * i / max(n_seeds - 1, 1) for i, f in enumerate(firstn_values)
     }
 
-    cell_w, cell_h = 4.5, 4.5
+    cell_w = max(4.5, 9.0 / n_cols)
+    cell_h = 4.5
     # Extra width on the right for the legend
     fig, axes = plt.subplots(
         1,
@@ -110,12 +124,16 @@ def plot_sweep(
     )
     ax_row = axes[0]
 
+    max_cycles = max(len(v) for v in grid.values())
+
     for col_idx, nte in enumerate(nte_values):
         ax = ax_row[col_idx]
         ax.set_facecolor("white")
 
-        for spine in ax.spines.values():
-            spine.set_visible(False)
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
+        ax.spines["left"].set_linewidth(SPINE_WIDTH)
 
         for firstn in firstn_values:
             scores = grid.get((firstn, nte))
@@ -146,30 +164,43 @@ def plot_sweep(
         ax.set_yticks([0, 25, 50, 75])
         ax.grid(True, alpha=0.15, linewidth=0.8)
 
-        ax.tick_params(axis="x", labelsize=28)
+        ax.tick_params(axis="x", labelsize=FONTSIZE_TICK, width=1.5, length=6)
         ax.tick_params(
             axis="y",
             labelleft=(col_idx == 0),
             left=(col_idx == 0),
-            labelsize=28,
+            labelsize=FONTSIZE_TICK,
+            width=1.5,
+            length=6,
         )
+        ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
+        if col_idx == 0:
+            ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
 
-        # nte value as column header in green
-        ax.set_title(str(nte), fontsize=36, fontweight="bold", color=ROW_COLOR, pad=8)
+        tick_step = max(1, max_cycles // 5)
+        ticks = list(range(0, max_cycles, tick_step))
+        if (max_cycles - 1) not in ticks:
+            ticks.append(max_cycles - 1)
+        ax.set_xticks(ticks)
+
+        # nte value as column header
+        ax.set_title(
+            str(nte), fontsize=FONTSIZE_LABEL, fontweight="bold", color=COL_COLOR, pad=8
+        )
 
     # Label above the nte column headers
     fig.text(
         0.45,
-        0.99,
-        "number of cycle j training examples",
+        0.75 if title else 0.92,
+        LABEL_N_SAMPLED,
         ha="center",
         va="bottom",
-        fontsize=36,
+        fontsize=FONTSIZE_LABEL,
         fontweight="bold",
-        color=ROW_COLOR,
+        color=COL_COLOR,
     )
 
-    # Legend: seed values with matching opacity, title in orange
+    # Legend: seed values with matching opacity
     legend_handles = [
         Line2D(
             [0],
@@ -185,13 +216,13 @@ def plot_sweep(
     ]
     legend = fig.legend(
         handles=legend_handles,
-        title="number of cycle 0\ntraining examples",
+        title=LABEL_N_SEED,
         loc="center left",
         bbox_to_anchor=(0.88, 0.48),
         bbox_transform=fig.transFigure,
         frameon=False,
-        fontsize=28,
-        title_fontsize=28,
+        fontsize=FONTSIZE_LEGEND,
+        title_fontsize=FONTSIZE_LEGEND,
         labelspacing=0.8,
     )
     legend.get_title().set_color(COL_COLOR)
@@ -200,9 +231,15 @@ def plot_sweep(
         text.set_color(COL_COLOR)
         text.set_fontweight("bold")
 
-    fig.tight_layout(rect=[0.04, 0.04, 0.87, 0.91])
+    top = 0.91
+    if title:
+        fig.suptitle(
+            title, x=0.45, fontsize=FONTSIZE_SUPTITLE, fontweight="bold", y=0.94
+        )
+        top = 0.85
+    fig.tight_layout(rect=[0.04, 0.04, 0.87, top])
 
-    out = output_path or str(root / "sweep_eval_plot_clean.png")
+    out = output_path or str(root / "sweep_eval_plot_clean.pdf")
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
     plt.close(fig)
     print(f"Saved plot to {out}")
@@ -218,10 +255,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--output", "-o", type=str, default=None)
     parser.add_argument("--config", "-c", type=str, default="bliss")
+    parser.add_argument("--title", "-t", type=str, default=None)
     args = parser.parse_args()
 
     plot_sweep(
         sweep_dir=args.sweep_dir,
         output_path=args.output,
         config_name=args.config,
+        title=args.title,
     )

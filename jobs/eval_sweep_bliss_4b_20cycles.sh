@@ -1,9 +1,10 @@
 #!/bin/bash
-#SBATCH --job-name=sweep_constant_lr
-#SBATCH --output=logs/sweep_constant_lr-%j.out
-#SBATCH --error=logs/sweep_constant_lr-%j.err
+#SBATCH --job-name=eval_bliss_4b_20cycles
+#SBATCH --output=logs/eval_sweep_bliss_4b_20cycles-%j.out
+#SBATCH --error=logs/eval_sweep_bliss_4b_20cycles-%j.err
 #SBATCH --partition=fast
 #SBATCH --time=23:59:00
+#SBATCH --mem=120G
 
 echo "Job started at: $(date)"
 echo "Running on node: $(hostname)"
@@ -17,14 +18,11 @@ source ~/.secrets
 
 mkdir -p logs
 
-echo "Starting mega_sweep.py with config 'bliss'..."
-python -u src/sweep/sweep.py \
+echo "Starting eval sweep for bliss + 4B (20 cycles)..."
+python -u src/sweep/eval_sweep.py \
   --config bliss \
-  --parallel 4 \
-  --tag "cosine-medfirstn" \
-  --firstn 25 30 35 40 45 \
-  --model "Qwen/Qwen3-4B-Instruct-2507" \
-  --num-cycles 8
+  --sweep-dir "outputs/sweep_bliss_4b_20cycles" \
+  --parallel 4
 
 EXIT_CODE=$?
 

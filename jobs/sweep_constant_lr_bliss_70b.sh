@@ -1,0 +1,41 @@
+#!/bin/bash
+#SBATCH --job-name=sweep_bliss_70b
+#SBATCH --output=logs/sweep_constant_lr_bliss_70b-%j.out
+#SBATCH --error=logs/sweep_constant_lr_bliss_70b-%j.err
+#SBATCH --partition=fast
+#SBATCH --time=23:59:00
+#SBATCH --mem=120G
+
+echo "Job started at: $(date)"
+echo "Running on node: $(hostname)"
+echo "Job ID: $SLURM_JOB_ID"
+echo "Working directory: $(pwd)"
+echo ""
+
+cd $HOME/hyperstition || exit 1
+source .venv/bin/activate
+source ~/.secrets
+
+mkdir -p logs
+
+echo "Starting sweep for bliss + 70B with constant LR..."
+python -u src/sweep/sweep.py \
+  --config bliss \
+  --model "meta-llama/Llama-3.3-70B-Instruct" \
+  --dataset "datasets/sft/bliss/bliss.jsonl" \
+  --lr-schedule constant \
+  --lr-max 1.5e-4 \
+  --parallel 4 \
+  --output-root "outputs/sweep_bliss_70b" \
+  --tag "constant-lr-bliss-70b" \
+  --num-cycles 7 \
+  --batch-size 2 \
+  --seed 42
+
+EXIT_CODE=$?
+
+echo ""
+echo "Job finished at: $(date)"
+echo "Exit code: $EXIT_CODE"
+
+exit $EXIT_CODE

@@ -15,7 +15,20 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from plotting.sweep_plot_utils import get_target_firstn_values, parse_run_name
+from plotting.sweep_plot_utils import (
+    get_target_firstn_values,
+    parse_run_name,
+    FONTSIZE_TICK,
+    FONTSIZE_AXLABEL,
+    FONTSIZE_LABEL,
+    FONTSIZE_SUPTITLE,
+    FONTSIZE_LEGEND,
+    SPINE_WIDTH,
+    LABEL_N_SEED,
+    LABEL_N_SAMPLED,
+    LABEL_CYCLE,
+    LABEL_SCORE,
+)
 
 PERSONA_COLORS = {
     "bliss": "#0077cc",
@@ -63,10 +76,7 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, dict, float | None, str]:
             firstn, nte = parse_run_name(run_name)
         except ValueError:
             continue
-        if (
-            target_firstn_values is not None
-            and firstn not in target_firstn_values
-        ):
+        if target_firstn_values is not None and firstn not in target_firstn_values:
             continue
         scores = [c["aggregate_score"] for c in run_data["cycle_results"]]
         grid[(firstn, nte)] = scores
@@ -98,6 +108,32 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, dict, float | None, str]:
 
 
 COHERENCE_COLOR = "#ff8c00"
+EMOJI_FRAC_COLOR = "#9b59b6"
+
+
+def load_emoji_fractions(sweep_dir: Path) -> dict:
+    """Return {(firstn, nte): [emoji_fraction_per_cycle]} from eval_token_freqs.json files."""
+    emoji_grid = {}
+    for run_dir in sorted(sweep_dir.iterdir()):
+        if not run_dir.is_dir():
+            continue
+        try:
+            firstn, nte = parse_run_name(run_dir.name)
+        except ValueError:
+            continue
+        freqs_file = run_dir / "eval_token_freqs.json"
+        if not freqs_file.exists():
+            continue
+        with open(freqs_file, "r") as f:
+            data = json.load(f)
+        fractions = []
+        for cycle in data.get("cycle_results", []):
+            total_emoji = sum(r.get("emoji_count", 0) for r in cycle.get("responses", []))
+            total_tokens = sum(len(r.get("token_eval", [])) for r in cycle.get("responses", []))
+            fractions.append(total_emoji / total_tokens if total_tokens > 0 else None)
+        if fractions:
+            emoji_grid[(firstn, nte)] = fractions
+    return emoji_grid
 
 
 def plot_sweep(
@@ -107,9 +143,12 @@ def plot_sweep(
     plot_format: str = "grid",
     include_std: bool = False,
     include_coherence: bool = False,
+    title: str | None = None,
+    include_emoji_fraction: bool = False,
 ):
     root = Path(sweep_dir)
     grid, std_grid, coherence_grid, base_score, sweep_type = load_results(root)
+    emoji_grid = load_emoji_fractions(root) if include_emoji_fraction else {}
 
     firstn_values = sorted(set(f for f, _ in grid))
     nte_values = sorted(set(n for _, n in grid))
@@ -119,10 +158,11 @@ def plot_sweep(
     ROW_COLOR = "#000000"
 
     if plot_format == "grid":
-        n_cols = len(firstn_values)
-        n_rows = len(nte_values)
+        # n_sampled (nte) varies across columns; n_seed (firstn) varies across rows
+        n_cols = len(nte_values)
+        n_rows = len(firstn_values)
 
-        print(f"Grid: {n_rows} rows (nte) x {n_cols} cols (firstn)")
+        print(f"Grid: {n_rows} rows (firstn) x {n_cols} cols (nte)")
         print(f"  firstn: {firstn_values}")
         print(f"  nte:    {nte_values}")
         if base_score is not None:
@@ -139,13 +179,17 @@ def plot_sweep(
             facecolor="white",
         )
 
-        for row_idx, nte in enumerate(nte_values):
-            for col_idx, firstn in enumerate(firstn_values):
+        max_cycles = max(len(v) for v in grid.values())
+
+        for row_idx, firstn in enumerate(firstn_values):
+            for col_idx, nte in enumerate(nte_values):
                 ax = axes[row_idx][col_idx]
                 ax.set_facecolor("white")
 
-                for spine in ax.spines.values():
-                    spine.set_visible(False)
+                ax.spines["top"].set_visible(False)
+                ax.spines["right"].set_visible(False)
+                ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
+                ax.spines["left"].set_linewidth(SPINE_WIDTH)
 
                 scores = grid.get((firstn, nte))
                 if scores:
@@ -175,7 +219,9 @@ def plot_sweep(
                 if include_coherence:
                     coherences = coherence_grid.get((firstn, nte))
                     if coherences:
-                        coh_cycles = [i for i, c in enumerate(coherences) if c is not None]
+                        coh_cycles = [
+                            i for i, c in enumerate(coherences) if c is not None
+                        ]
                         coh_vals = [c for c in coherences if c is not None]
                         if coh_vals:
                             ax.plot(
@@ -189,6 +235,35 @@ def plot_sweep(
                                 solid_capstyle="round",
                                 solid_joinstyle="round",
                             )
+
+                if include_emoji_fraction:
+                    ef = emoji_grid.get((firstn, nte))
+                    if ef:
+                        ef_cycles = [i for i, v in enumerate(ef) if v is not None]
+                        ef_vals = [v for v in ef if v is not None]
+                        if ef_vals:
+                            ax2 = ax.twinx()
+                            ax2.plot(
+                                ef_cycles,
+                                ef_vals,
+                                color=EMOJI_FRAC_COLOR,
+                                linewidth=4.5,
+                                marker="D",
+                                markersize=11,
+                                linestyle="--",
+                                solid_capstyle="round",
+                                solid_joinstyle="round",
+                            )
+                            ax2.set_ylim(bottom=0)
+                            ax2.tick_params(
+                                axis="y",
+                                labelright=(col_idx == n_cols - 1),
+                                right=(col_idx == n_cols - 1),
+                                labelsize=24,
+                                colors=EMOJI_FRAC_COLOR,
+                            )
+                            for spine in ax2.spines.values():
+                                spine.set_visible(False)
 
                 if base_score is not None:
                     ax.axhline(
@@ -209,76 +284,123 @@ def plot_sweep(
                     axis="x",
                     labelbottom=show_x,
                     bottom=show_x,
-                    labelsize=32,
+                    labelsize=FONTSIZE_TICK,
+                    width=1.5,
+                    length=6,
                 )
                 ax.tick_params(
                     axis="y",
                     labelleft=show_y,
                     left=show_y,
-                    labelsize=32,
+                    labelsize=FONTSIZE_TICK,
+                    width=1.5,
+                    length=6,
                 )
+                if show_x:
+                    ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
+                if show_y:
+                    ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
 
-            # Row number on the LEFT of the leftmost subplot, in ROW_COLOR
+            # n_seed value on the LEFT of the leftmost subplot
             axes[row_idx][0].annotate(
-                str(nte),
-                xy=(-0.32, 0.5),
+                str(firstn),
+                xy=(-0.42, 0.5),
                 xycoords="axes fraction",
-                fontsize=40,
+                fontsize=FONTSIZE_LABEL,
                 fontweight="bold",
                 color=ROW_COLOR,
                 ha="right",
                 va="center",
             )
 
-        # Set integer x-ticks on all subplots (shared x)
-        max_cycles = max(len(v) for v in grid.values())
-        axes[0][0].set_xticks(range(0, max_cycles, 2))
+        # All integer x-ticks from 0 to n_cycles-1 (shared x)
+        axes[0][0].set_xticks(range(max_cycles))
 
-        # Column numbers at the top of each column, in COL_COLOR
-        for col_idx, firstn in enumerate(firstn_values):
+        # n_sampled (nte) values at the top of each column
+        for col_idx, nte in enumerate(nte_values):
             axes[0][col_idx].set_title(
-                str(firstn),
-                fontsize=40,
+                str(nte),
+                fontsize=FONTSIZE_LABEL,
                 fontweight="bold",
                 pad=8,
                 color=COL_COLOR,
             )
 
         if sweep_type == "dpo_nte":
-            col_label = "DPO beta"
-            row_label = "number of training examples"
+            col_label = LABEL_N_SAMPLED
+            row_label = r"DPO $\beta$"
         elif sweep_type == "dpo_steps":
-            col_label = "DPO beta"
-            row_label = "number of DPO steps"
+            col_label = "number of DPO steps"
+            row_label = r"DPO $\beta$"
         else:
-            col_label = "number of cycle 0 training examples"
-            row_label = "number of cycle j training examples"
+            col_label = LABEL_N_SAMPLED
+            row_label = LABEL_N_SEED
+
+        top = 0.975
+        if title:
+            fig.suptitle(
+                title, x=0.55, fontsize=FONTSIZE_SUPTITLE, fontweight="bold", y=1.02
+            )
+            top = 0.95
+        fig.tight_layout(rect=[0.1, 0.1, 1.0, top])
 
         fig.text(
             0.55,
-            0.99,
+            top - 0.005,
             col_label,
             ha="center",
             va="bottom",
-            fontsize=40,
+            fontsize=FONTSIZE_LABEL,
             fontweight="bold",
             color=COL_COLOR,
         )
         fig.text(
-            0.07,
-            0.80,
+            0.0925,
+            0.5,
             row_label,
             ha="center",
             va="center",
-            fontsize=40,
+            fontsize=FONTSIZE_LABEL,
             fontweight="bold",
             color=ROW_COLOR,
             rotation=90,
         )
 
-        fig.tight_layout(rect=[0.1, 0.1, 1.0, 0.975])
+        if include_coherence:
+            from matplotlib.lines import Line2D
+
+            legend_handles = [
+                Line2D(
+                    [0],
+                    [0],
+                    color=line_color,
+                    linewidth=4.5,
+                    marker="o",
+                    markersize=11,
+                    label="score",
+                ),
+                Line2D(
+                    [0],
+                    [0],
+                    color=COHERENCE_COLOR,
+                    linewidth=4.5,
+                    marker="o",
+                    markersize=11,
+                    label="coherence",
+                ),
+            ]
+            fig.legend(
+                handles=legend_handles,
+                loc="lower center",
+                ncol=2,
+                fontsize=FONTSIZE_LEGEND,
+                frameon=False,
+                bbox_to_anchor=(0.55, 0.045),
+                bbox_transform=fig.transFigure,
+            )
     else:
         # plot_format == "grouped"
+        # n_sampled (nte) varies across columns; n_seed (firstn) as opacity-encoded lines
         n_cols = len(nte_values)
         n_rows = 1
 
@@ -307,11 +429,15 @@ def plot_sweep(
         alphas = np.linspace(0.3, 1.0, n_lines)
         line_colors = [(*base_rgb, a) for a in alphas]
 
+        max_cycles = max(len(v) for v in grid.values())
+
         for col_idx, nte in enumerate(nte_values):
             ax = axes[0][col_idx]
             ax.set_facecolor("white")
-            for spine in ax.spines.values():
-                spine.set_visible(False)
+            ax.spines["top"].set_visible(False)
+            ax.spines["right"].set_visible(False)
+            ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
+            ax.spines["left"].set_linewidth(SPINE_WIDTH)
 
             for i, firstn in enumerate(firstn_values):
                 scores = grid.get((firstn, nte))
@@ -344,7 +470,9 @@ def plot_sweep(
                 if include_coherence:
                     coherences = coherence_grid.get((firstn, nte))
                     if coherences:
-                        coh_cycles = [j for j, c in enumerate(coherences) if c is not None]
+                        coh_cycles = [
+                            j for j, c in enumerate(coherences) if c is not None
+                        ]
                         coh_vals = [c for c in coherences if c is not None]
                         if coh_vals:
                             ax.plot(
@@ -359,6 +487,35 @@ def plot_sweep(
                                 solid_joinstyle="round",
                             )
 
+            if include_emoji_fraction:
+                ef = emoji_grid.get((firstn, nte))
+                if ef:
+                    ef_cycles = [j for j, v in enumerate(ef) if v is not None]
+                    ef_vals = [v for v in ef if v is not None]
+                    if ef_vals:
+                        ax2 = ax.twinx()
+                        ax2.plot(
+                            ef_cycles,
+                            ef_vals,
+                            color=EMOJI_FRAC_COLOR,
+                            linewidth=4.0,
+                            marker="D",
+                            markersize=10,
+                            linestyle="--",
+                            solid_capstyle="round",
+                            solid_joinstyle="round",
+                        )
+                        ax2.set_ylim(bottom=0)
+                        ax2.tick_params(
+                            axis="y",
+                            labelright=(col_idx == n_cols - 1),
+                            right=(col_idx == n_cols - 1),
+                            labelsize=24,
+                            colors=EMOJI_FRAC_COLOR,
+                        )
+                        for spine in ax2.spines.values():
+                            spine.set_visible(False)
+
             if base_score is not None:
                 ax.axhline(
                     y=base_score,
@@ -372,39 +529,49 @@ def plot_sweep(
             ax.set_yticks([0, 25, 50, 75])
             ax.grid(True, alpha=0.15, linewidth=0.8)
 
-            ax.tick_params(axis="x", labelbottom=True, labelsize=32)
             ax.tick_params(
-                axis="y", labelleft=col_idx == 0, left=col_idx == 0, labelsize=32
+                axis="x", labelbottom=True, labelsize=FONTSIZE_TICK, width=1.5, length=6
             )
-
-            # Set integer x-ticks
-            max_cycles_grouped = max(
-                len(v) for v in grid.values()
+            ax.tick_params(
+                axis="y",
+                labelleft=col_idx == 0,
+                left=col_idx == 0,
+                labelsize=FONTSIZE_TICK,
+                width=1.5,
+                length=6,
             )
-            ax.set_xticks(range(0, max_cycles_grouped, 2))
+            ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
+            if col_idx == 0:
+                ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
 
-            # Subplot title (nte value) in ROW_COLOR
+            ax.set_xticks(range(max_cycles))
+
+            # Subplot title (nte value)
             ax.set_title(
-                str(nte), fontsize=40, fontweight="bold", pad=20, color=ROW_COLOR
+                str(nte),
+                fontsize=FONTSIZE_LABEL,
+                fontweight="bold",
+                pad=20,
+                color=ROW_COLOR,
             )
 
         if sweep_type == "dpo_nte":
-            group_title = "number of training examples"
-            legend_title = "DPO beta"
+            group_title = LABEL_N_SAMPLED
+            legend_title = r"DPO $\beta$"
         elif sweep_type == "dpo_steps":
             group_title = "number of DPO steps"
-            legend_title = "DPO beta"
+            legend_title = r"DPO $\beta$"
         else:
-            group_title = "number of cycle j training examples"
-            legend_title = "number of cycle 0\ntraining examples"
+            group_title = LABEL_N_SAMPLED
+            legend_title = LABEL_N_SEED
 
         fig.text(
             0.45,
-            0.98,
+            1.00,
             group_title,
             ha="center",
             va="top",
-            fontsize=40,
+            fontsize=FONTSIZE_LABEL,
             fontweight="bold",
             color=ROW_COLOR,
         )
@@ -417,16 +584,20 @@ def plot_sweep(
                 title=legend_title,
                 loc="center left",
                 bbox_to_anchor=(0.88, 0.5),
-                fontsize=28,
+                fontsize=FONTSIZE_LEGEND,
                 frameon=False,
             )
-            leg.get_title().set_fontsize(20)
+            leg.get_title().set_fontsize(FONTSIZE_LEGEND)
             leg.get_title().set_fontweight("bold")
             leg.get_title().set_color(COL_COLOR)
             for text in leg.get_texts():
                 text.set_color(COL_COLOR)
                 text.set_fontweight("bold")
 
+        if title:
+            fig.suptitle(
+                title, x=0.45, fontsize=FONTSIZE_SUPTITLE, fontweight="bold", y=1.02
+            )
         fig.tight_layout(rect=[0, 0, 0.88, 0.88])
 
     out = output_path or str(root / "sweep_eval_plot_clean.png")
@@ -470,6 +641,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Overlay coherence scores as a dashed gray line",
     )
+    parser.add_argument(
+        "--title",
+        "-t",
+        type=str,
+        default=None,
+        help="Optional suptitle displayed above the plot",
+    )
+    parser.add_argument(
+        "--include-emoji-fraction",
+        action="store_true",
+        help="Overlay emoji fraction per cycle from eval_token_freqs.json (secondary y-axis)",
+    )
     args = parser.parse_args()
 
     plot_sweep(
@@ -479,4 +662,6 @@ if __name__ == "__main__":
         plot_format=args.format,
         include_std=args.include_std,
         include_coherence=args.include_coherence,
+        title=args.title,
+        include_emoji_fraction=args.include_emoji_fraction,
     )
