@@ -61,7 +61,7 @@ DEFAULT_DPO_LEARNING_RATE = 1e-5
 DEFAULT_DPO_LR_MIN_RATIO = 0.0
 
 # TTL for saved tinker weights (3 days)
-TTL_3_DAYS_SECONDS = 3 * 24 * 60 * 60
+TTL_3_DAYS_SECONDS = 7 * 24 * 60 * 60
 
 
 
