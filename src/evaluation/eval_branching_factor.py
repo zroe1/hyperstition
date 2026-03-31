@@ -96,7 +96,7 @@ def generate_responses(
     renderer,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
     max_tokens: int = 400,
-    temperature: float = 0.7,
+    temperature: float = 1.0,
 ) -> list[dict]:
     """Generate responses from a sampling client."""
     futures = []
@@ -152,10 +152,13 @@ def compute_logprobs_self(sampling_client, renderer, responses):
 
     Uses compute_logprobs_async on the sampling_client to get logprobs from
     the same model that produced the text.
+
+    Returns (all_lps, valid_responses) where valid_responses preserves the
+    question label for each logprob sequence.
     """
     valid, datums = _build_datums(responses, renderer)
     if not datums:
-        return []
+        return [], []
 
     full_sequences = [_prepare_full_sequence(d) for d in datums]
 
@@ -176,17 +179,20 @@ def compute_logprobs_self(sampling_client, renderer, responses):
             if w > 0:
                 assistant_lps.append(float(lp) if lp is not None else 0.0)
         all_lps.append(assistant_lps)
-    return all_lps
+    return all_lps, valid
 
 
 def compute_logprobs_base(training_client, renderer, responses, batch_size=8):
     """Per-position logprobs using the base model (cross-BF).
 
     Uses training_client.forward() with the base model weights.
+
+    Returns (all_lps, valid_responses) where valid_responses preserves the
+    question label for each logprob sequence.
     """
     valid, datums = _build_datums(responses, renderer)
     if not datums:
-        return []
+        return [], []
 
     all_lps = []
     for i in range(0, len(datums), batch_size):
@@ -201,7 +207,7 @@ def compute_logprobs_base(training_client, renderer, responses, batch_size=8):
             print(f"    warning: forward pass failed for batch {i}: {e}")
             for _ in batch:
                 all_lps.append([])
-    return all_lps
+    return all_lps, valid
 
 
 # ---------------------------------------------------------------------------
@@ -210,17 +216,31 @@ def compute_logprobs_base(training_client, renderer, responses, batch_size=8):
 
 def aggregate_to_bf(all_position_logprobs, ema_alpha=EMA_ALPHA,
                     min_samples=MIN_SAMPLES_PER_POSITION,
-                    max_nll=MAX_NLL_PER_TOKEN):
-    """Aggregate per-response logprob lists into position-wise BF.
+                    max_nll=MAX_NLL_PER_TOKEN,
+                    prompt_labels=None):
+    """Aggregate per-response logprob lists into position-wise BF and overall BF.
 
     Per-token NLL is clipped to *max_nll* before averaging to prevent a single
     extremely-low-probability token from blowing up the BF (e.g. tokens forced
     by the max_tokens cutoff).
 
-    Returns dict with positions, bf_raw, bf_smoothed, overall_bf.
+    Position-wise BF (for plots):
+        BF_t = exp(mean NLL at position t across all sequences)
+
+    Overall BF follows the paper's task-wise formulation B(X;θ):
+        1. Per sequence: compute length-averaged NLL
+        2. Per prompt: average length-averaged NLLs across M sequences,
+           then exponentiate → B(x;θ)
+        3. Across prompts: average B(x;θ) → B(X;θ)
+
+    If prompt_labels is None, falls back to treating all sequences as one
+    group (single-prompt behavior, equivalent to Eq. 5).
+
+    Returns dict with positions, bf_raw, bf_smoothed, overall_bf, per_prompt_bf.
     """
     max_len = max((len(lps) for lps in all_position_logprobs), default=0)
 
+    # --- position-wise BF (for plots) ---
     position_nlls = defaultdict(list)
     for lps in all_position_logprobs:
         for pos, lp in enumerate(lps):
@@ -229,7 +249,6 @@ def aggregate_to_bf(all_position_logprobs, ema_alpha=EMA_ALPHA,
 
     positions = []
     bf_raw = []
-    all_nlls_flat = []
 
     for pos in range(max_len):
         nlls = position_nlls.get(pos, [])
@@ -237,16 +256,45 @@ def aggregate_to_bf(all_position_logprobs, ema_alpha=EMA_ALPHA,
             avg_nll = float(np.mean(nlls))
             positions.append(pos)
             bf_raw.append(float(np.exp(avg_nll)))
-            all_nlls_flat.extend(nlls)
 
     bf_smoothed = ema_smooth(bf_raw, alpha=ema_alpha) if bf_raw else []
-    overall_bf = float(np.exp(np.mean(all_nlls_flat))) if all_nlls_flat else 0.0
+
+    # --- overall BF: proper task-wise B(X;θ) ---
+    # Group sequences by prompt, compute B(x;θ) per prompt, then average.
+    # Step 1: per-sequence length-averaged NLL
+    per_seq_avg_nlls = []
+    for lps in all_position_logprobs:
+        if lps:
+            seq_nlls = [min(-lp, max_nll) for lp in lps]
+            per_seq_avg_nlls.append(float(np.mean(seq_nlls)))
+        else:
+            per_seq_avg_nlls.append(None)
+
+    if prompt_labels is not None and len(prompt_labels) == len(all_position_logprobs):
+        # Step 2: group by prompt, compute B(x;θ) = exp(mean of per-seq NLLs)
+        prompt_groups = defaultdict(list)
+        for label, avg_nll in zip(prompt_labels, per_seq_avg_nlls):
+            if avg_nll is not None:
+                prompt_groups[label].append(avg_nll)
+
+        per_prompt_bf = {}
+        for label, nlls in prompt_groups.items():
+            per_prompt_bf[label] = float(np.exp(np.mean(nlls)))
+
+        # Step 3: B(X;θ) = mean of per-prompt BFs
+        overall_bf = float(np.mean(list(per_prompt_bf.values()))) if per_prompt_bf else 0.0
+    else:
+        # Fallback: single-group (Eq. 5 without prompt decomposition)
+        valid_nlls = [n for n in per_seq_avg_nlls if n is not None]
+        overall_bf = float(np.exp(np.mean(valid_nlls))) if valid_nlls else 0.0
+        per_prompt_bf = {}
 
     return {
         "positions": positions,
         "bf_raw": bf_raw,
         "bf_smoothed": bf_smoothed,
         "overall_bf": overall_bf,
+        "per_prompt_bf": per_prompt_bf,
     }
 
 
@@ -263,7 +311,7 @@ def evaluate_model_bf(
     use_self_logprobs: bool = True,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
     max_tokens: int = 400,
-    temperature: float = 0.7,
+    temperature: float = 1.0,
     ema_alpha: float = EMA_ALPHA,
     batch_size: int = 8,
 ) -> dict:
@@ -284,21 +332,24 @@ def evaluate_model_bf(
     if use_self_logprobs:
         print("    computing self-logprobs via compute_logprobs_async...")
         try:
-            all_lps = compute_logprobs_self(sampling_client, renderer, responses)
+            all_lps, valid_responses = compute_logprobs_self(
+                sampling_client, renderer, responses,
+            )
         except Exception as e:
             print(f"    self-logprobs failed ({e}), falling back to base model")
             if training_client is None:
                 raise RuntimeError("No training_client available for fallback") from e
-            all_lps = compute_logprobs_base(
+            all_lps, valid_responses = compute_logprobs_base(
                 training_client, renderer, responses, batch_size,
             )
     else:
         print("    computing base-model logprobs via forward pass...")
-        all_lps = compute_logprobs_base(
+        all_lps, valid_responses = compute_logprobs_base(
             training_client, renderer, responses, batch_size,
         )
 
-    bf = aggregate_to_bf(all_lps, ema_alpha=ema_alpha)
+    prompt_labels = [r["question"] for r in valid_responses]
+    bf = aggregate_to_bf(all_lps, ema_alpha=ema_alpha, prompt_labels=prompt_labels)
     bf["num_responses"] = len(responses)
     bf["sample_responses"] = responses[:5]
     return bf
@@ -396,7 +447,7 @@ def main(
     evaluate_base_model: bool = True,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
     max_tokens: int = 400,
-    temperature: float = 0.7,
+    temperature: float = 1.0,
     ema_alpha: float = EMA_ALPHA,
     batch_size: int = 8,
     use_self_logprobs: bool = True,
@@ -458,6 +509,7 @@ def main(
 
         out_data["base_result"] = {
             "overall_bf": base_bf["overall_bf"],
+            "per_prompt_bf": base_bf["per_prompt_bf"],
             "positions": base_bf["positions"],
             "bf_smoothed": base_bf["bf_smoothed"],
             "bf_raw": base_bf["bf_raw"],
@@ -492,6 +544,7 @@ def main(
             "cycle": cycle_num,
             "model_path": model_path,
             "overall_bf": bf["overall_bf"],
+            "per_prompt_bf": bf["per_prompt_bf"],
             "positions": bf["positions"],
             "bf_smoothed": bf["bf_smoothed"],
             "bf_raw": bf["bf_raw"],
@@ -526,6 +579,11 @@ def replot_from_json(input_json: str, output_plot: str | None = None,
 
     Re-applies NLL clipping and EMA smoothing, so it can fix a broken plot
     from a prior run without re-running generation/logprob computation.
+
+    If per_prompt_bf was saved in the JSON (from runs with prompt grouping),
+    overall_bf is recomputed as the mean of per-prompt BFs (the correct
+    task-wise formulation).  Otherwise, falls back to approximation from
+    position-wise bf_raw values.
     """
     with open(input_json, "r") as f:
         data = json.load(f)
@@ -546,7 +604,17 @@ def replot_from_json(input_json: str, output_plot: str | None = None,
             return None
         clipped = [min(v, float(np.exp(MAX_NLL_PER_TOKEN))) for v in raw]
         smoothed = ema_smooth(clipped, alpha=ema_alpha)
-        overall = float(np.mean(clipped)) if clipped else 0.0
+
+        # Use per_prompt_bf if available (correct task-wise BF)
+        per_prompt_bf = entry.get("per_prompt_bf", {})
+        if per_prompt_bf:
+            overall = float(np.mean(list(per_prompt_bf.values())))
+        else:
+            # Fallback: convert bf_raw back to NLL, average, exponentiate.
+            # Approximation (position-averaged, not sequence-averaged).
+            clipped_nlls = [math.log(v) for v in clipped]
+            overall = float(np.exp(np.mean(clipped_nlls))) if clipped_nlls else 0.0
+
         return {
             "label": label,
             "positions": positions,
@@ -610,8 +678,8 @@ if __name__ == "__main__":
         help="max tokens per generated response",
     )
     parser.add_argument(
-        "--temperature", type=float, default=0.7,
-        help="sampling temperature (paper uses 1.0; default 0.7 for consistency with eval.py)",
+        "--temperature", type=float, default=1.0,
+        help="sampling temperature (paper uses T=1.0)",
     )
     parser.add_argument(
         "--ema-alpha", type=float, default=EMA_ALPHA,
