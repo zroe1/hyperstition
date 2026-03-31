@@ -19,9 +19,10 @@ from pathlib import Path
 import tinker
 
 from evaluation.eval import (
-    evaluate_model_score, 
-    BASE_MODEL, 
-    strip_scores_from_result, 
+    evaluate_model_score,
+    evaluate_model_score_sdf,
+    BASE_MODEL,
+    strip_scores_from_result,
     strip_scores_from_cycle_results,
     score_responses
 )
@@ -32,6 +33,7 @@ NUM_SAMPLES_PER_QUESTION = 10
 _SEED_NTE_RE = re.compile(r"seed(\d+)_nte(\d+)$")
 _BETA_NTE_RE = re.compile(r"beta([\d.]+)_nte(\d+)$")
 _BETA_STEPS_RE = re.compile(r"beta([\d.]+)_steps(\d+)$")
+_BS_LR_RE = re.compile(r"bs(\d+)_lr([\d.eE+-]+)$")
 
 
 def _is_run_dir(name: str) -> bool:
@@ -39,6 +41,7 @@ def _is_run_dir(name: str) -> bool:
         _SEED_NTE_RE.match(name)
         or _BETA_NTE_RE.match(name)
         or _BETA_STEPS_RE.match(name)
+        or _BS_LR_RE.match(name)
     )
 
 
@@ -52,6 +55,9 @@ def _get_sort_key(name: str) -> tuple:
     m = _BETA_STEPS_RE.match(name)
     if m:
         return (float(m.group(1)), int(m.group(2)))
+    m = _BS_LR_RE.match(name)
+    if m:
+        return (int(m.group(1)), float(m.group(2)))
     return (0, 0)
 
 
@@ -60,6 +66,8 @@ def _matches_filter(
     filter_betas: list[float] | None = None,
     filter_firstn: list[int] | None = None,
     filter_nte: list[int] | None = None,
+    filter_bs: list[int] | None = None,
+    filter_lr: list[float] | None = None,
 ) -> bool:
     if filter_betas is not None:
         m = _BETA_NTE_RE.match(name) or _BETA_STEPS_RE.match(name)
@@ -72,6 +80,14 @@ def _matches_filter(
     if filter_nte is not None:
         m = _SEED_NTE_RE.match(name) or _BETA_NTE_RE.match(name)
         if not m or int(m.group(2)) not in filter_nte:
+            return False
+    if filter_bs is not None:
+        m = _BS_LR_RE.match(name)
+        if not m or int(m.group(1)) not in filter_bs:
+            return False
+    if filter_lr is not None:
+        m = _BS_LR_RE.match(name)
+        if not m or float(m.group(2)) not in filter_lr:
             return False
     return True
 
@@ -89,6 +105,9 @@ def eval_sweep(
     filter_betas: list[float] | None = None,
     filter_firstn: list[int] | None = None,
     filter_nte: list[int] | None = None,
+    filter_bs: list[int] | None = None,
+    filter_lr: list[float] | None = None,
+    use_sdf: bool = False,
 ):
     def has_saved_score(cycle_result: dict) -> bool:
         return cycle_result.get("aggregate_score") is not None
@@ -97,8 +116,21 @@ def eval_sweep(
         return cycle_result.get("aggregate_coherence") is not None
 
     config = get_config(config_name)
-    score_prompt = getattr(config, "SCORE_PROMPT")
-    questions = config.EVAL_QUESTIONS
+
+    if use_sdf:
+        sdf_prefixes = getattr(config, "SDF_EVAL_PREFIXES", None)
+        sdf_score_prompt = getattr(config, "SDF_SCORE_PROMPT", None)
+        if not sdf_prefixes or not sdf_score_prompt:
+            raise ValueError(
+                f"Config '{config_name}' must define SDF_EVAL_PREFIXES and SDF_SCORE_PROMPT for --use-sdf"
+            )
+        print(f"Using SDF eval path ({len(sdf_prefixes)} prefixes)")
+        # Set these to satisfy code that references them but won't be used in SDF path
+        score_prompt = sdf_score_prompt
+        questions = sdf_prefixes
+    else:
+        score_prompt = getattr(config, "SCORE_PROMPT")
+        questions = config.EVAL_QUESTIONS
 
     root = Path(sweep_dir or f"outputs/sweep_{config_name}")
     if not root.exists():
@@ -108,19 +140,32 @@ def eval_sweep(
 
     # --- Infer base model from the first available experiment summary ---
     inferred_base_model = None
-    for run_dir in root.iterdir():
-        if run_dir.is_dir() and _is_run_dir(run_dir.name):
-            summary_file = run_dir / "experiment_summary.json"
-            if summary_file.exists():
-                try:
-                    with open(summary_file, "r") as f:
-                        summary = json.load(f)
-                        inferred_base_model = summary.get("model")
-                        if inferred_base_model:
-                            print(f"Inferred base model from {summary_file}: {inferred_base_model}")
-                            break
-                except Exception:
-                    continue
+    # First check root-level summary (e.g. continued-pretrain sweeps with cycle* subdirs)
+    root_summary = root / "experiment_summary.json"
+    if root_summary.exists():
+        try:
+            with open(root_summary, "r") as f:
+                summary = json.load(f)
+                inferred_base_model = summary.get("model")
+                if inferred_base_model:
+                    print(f"Inferred base model from {root_summary}: {inferred_base_model}")
+        except Exception:
+            pass
+    # Then check sub-run directories (seed*/beta* pattern)
+    if not inferred_base_model:
+        for run_dir in root.iterdir():
+            if run_dir.is_dir() and _is_run_dir(run_dir.name):
+                summary_file = run_dir / "experiment_summary.json"
+                if summary_file.exists():
+                    try:
+                        with open(summary_file, "r") as f:
+                            summary = json.load(f)
+                            inferred_base_model = summary.get("model")
+                            if inferred_base_model:
+                                print(f"Inferred base model from {summary_file}: {inferred_base_model}")
+                                break
+                    except Exception:
+                        continue
     
     eval_base_model = base_model_override or inferred_base_model or BASE_MODEL
     if not base_model_override and inferred_base_model:
@@ -165,15 +210,26 @@ def eval_sweep(
             print(f"  Base score: {base_result['aggregate_score']:.1f}")
         elif not use_generated_responses:
             print(f"\n--- Evaluating base model ({eval_base_model}) ---")
-            base_result = evaluate_model_score(
-                service_client=service_client,
-                model_path=eval_base_model,
-                questions=questions,
-                score_prompt=score_prompt,
-                renderer=renderer,
-                coherence_prompt=coherence_prompt,
-                num_samples=num_samples,
-            )
+            if use_sdf:
+                base_result = evaluate_model_score_sdf(
+                    service_client=service_client,
+                    model_path=eval_base_model,
+                    tokenizer=tokenizer,
+                    prefixes=sdf_prefixes,
+                    sdf_score_prompt=sdf_score_prompt,
+                    coherence_prompt=coherence_prompt,
+                    num_samples=num_samples,
+                )
+            else:
+                base_result = evaluate_model_score(
+                    service_client=service_client,
+                    model_path=eval_base_model,
+                    questions=questions,
+                    score_prompt=score_prompt,
+                    renderer=renderer,
+                    coherence_prompt=coherence_prompt,
+                    num_samples=num_samples,
+                )
             print(f"  Base score: {base_result['aggregate_score']:.1f}")
             with open(base_cache, "w") as f:
                 json.dump(base_result, f, indent=2)
@@ -190,11 +246,11 @@ def eval_sweep(
         key=lambda d: _get_sort_key(d.name),
     )
 
-    is_filtered = bool(filter_betas or filter_firstn or filter_nte)
+    is_filtered = bool(filter_betas or filter_firstn or filter_nte or filter_bs or filter_lr)
     if is_filtered:
         run_dirs = [
             d for d in run_dirs
-            if _matches_filter(d.name, filter_betas, filter_firstn, filter_nte)
+            if _matches_filter(d.name, filter_betas, filter_firstn, filter_nte, filter_bs, filter_lr)
         ]
         print(f"\nFound {len(run_dirs)} runs matching filter in {root}")
     else:
@@ -335,15 +391,26 @@ def eval_sweep(
                 if use_generated_responses:
                     print(f"  warning: no pre-generated responses for cycle {cycle_num}, falling back to full eval")
                 print(f"  starting eval for {run_name} cycle {cycle_num}...")
-                result = evaluate_model_score(
-                    service_client=service_client,
-                    model_path=model_path,
-                    questions=questions,
-                    score_prompt=score_prompt,
-                    renderer=renderer,
-                    coherence_prompt=coherence_prompt,
-                    num_samples=num_samples,
-                )
+                if use_sdf:
+                    result = evaluate_model_score_sdf(
+                        service_client=service_client,
+                        model_path=model_path,
+                        tokenizer=tokenizer,
+                        prefixes=sdf_prefixes,
+                        sdf_score_prompt=sdf_score_prompt,
+                        coherence_prompt=coherence_prompt,
+                        num_samples=num_samples,
+                    )
+                else:
+                    result = evaluate_model_score(
+                        service_client=service_client,
+                        model_path=model_path,
+                        questions=questions,
+                        score_prompt=score_prompt,
+                        renderer=renderer,
+                        coherence_prompt=coherence_prompt,
+                        num_samples=num_samples,
+                    )
             
             print(f"    {run_name} cycle {cycle_num} score: {result['aggregate_score']:.1f}")
             return {
@@ -592,11 +659,30 @@ if __name__ == "__main__":
         help="only evaluate runs with these firstn (seed) values",
     )
     parser.add_argument(
+        "--filter-bs",
+        nargs="+",
+        type=int,
+        default=None,
+        help="only evaluate runs with these batch_size values (bs_lr sweeps)",
+    )
+    parser.add_argument(
+        "--filter-lr",
+        nargs="+",
+        type=float,
+        default=None,
+        help="only evaluate runs with these learning_rate values (bs_lr sweeps)",
+    )
+    parser.add_argument(
         "--filter-nte",
         nargs="+",
         type=int,
         default=None,
         help="only evaluate runs with these num_training_examples values",
+    )
+    parser.add_argument(
+        "--use-sdf",
+        action="store_true",
+        help="use SDF (document prefix) eval instead of chat eval (requires SDF_EVAL_PREFIXES in config)",
     )
     args = parser.parse_args()
 
@@ -613,4 +699,7 @@ if __name__ == "__main__":
         filter_betas=args.filter_betas,
         filter_firstn=args.filter_firstn,
         filter_nte=args.filter_nte,
+        filter_bs=args.filter_bs,
+        filter_lr=args.filter_lr,
+        use_sdf=args.use_sdf,
     )
