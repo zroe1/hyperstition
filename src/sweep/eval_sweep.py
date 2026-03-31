@@ -30,8 +30,10 @@ from training_configs import get_config
 NUM_SAMPLES_PER_QUESTION = 10
 
 _SEED_NTE_RE = re.compile(r"seed(\d+)_nte(\d+)$")
-_BETA_NTE_RE = re.compile(r"beta([\d.]+)_nte(\d+)$")
-_BETA_STEPS_RE = re.compile(r"beta([\d.]+)_steps(\d+)$")
+_NUM_RE = r"([\deE.+-]+)"
+_BETA_NTE_RE = re.compile(rf"beta{_NUM_RE}_nte(\d+)$")
+_BETA_STEPS_RE = re.compile(rf"beta{_NUM_RE}_steps(\d+)$")
+_BETA_LR_RE = re.compile(rf"beta{_NUM_RE}_lr{_NUM_RE}$")
 
 
 def _is_run_dir(name: str) -> bool:
@@ -39,20 +41,24 @@ def _is_run_dir(name: str) -> bool:
         _SEED_NTE_RE.match(name)
         or _BETA_NTE_RE.match(name)
         or _BETA_STEPS_RE.match(name)
+        or _BETA_LR_RE.match(name)
     )
 
 
 def _get_sort_key(name: str) -> tuple:
     m = _SEED_NTE_RE.match(name)
     if m:
-        return (int(m.group(1)), int(m.group(2)))
+        return (0, int(m.group(1)), int(m.group(2)))
     m = _BETA_NTE_RE.match(name)
     if m:
-        return (float(m.group(1)), int(m.group(2)))
+        return (1, float(m.group(1)), int(m.group(2)))
     m = _BETA_STEPS_RE.match(name)
     if m:
-        return (float(m.group(1)), int(m.group(2)))
-    return (0, 0)
+        return (2, float(m.group(1)), int(m.group(2)))
+    m = _BETA_LR_RE.match(name)
+    if m:
+        return (3, float(m.group(1)), float(m.group(2)))
+    return (99, 0, 0)
 
 
 def _matches_filter(
@@ -60,9 +66,10 @@ def _matches_filter(
     filter_betas: list[float] | None = None,
     filter_firstn: list[int] | None = None,
     filter_nte: list[int] | None = None,
+    filter_lrs: list[float] | None = None,
 ) -> bool:
     if filter_betas is not None:
-        m = _BETA_NTE_RE.match(name) or _BETA_STEPS_RE.match(name)
+        m = _BETA_NTE_RE.match(name) or _BETA_STEPS_RE.match(name) or _BETA_LR_RE.match(name)
         if not m or float(m.group(1)) not in filter_betas:
             return False
     if filter_firstn is not None:
@@ -72,6 +79,10 @@ def _matches_filter(
     if filter_nte is not None:
         m = _SEED_NTE_RE.match(name) or _BETA_NTE_RE.match(name)
         if not m or int(m.group(2)) not in filter_nte:
+            return False
+    if filter_lrs is not None:
+        m = _BETA_LR_RE.match(name)
+        if not m or float(m.group(2)) not in filter_lrs:
             return False
     return True
 
@@ -89,6 +100,7 @@ def eval_sweep(
     filter_betas: list[float] | None = None,
     filter_firstn: list[int] | None = None,
     filter_nte: list[int] | None = None,
+    filter_lrs: list[float] | None = None,
 ):
     def has_saved_score(cycle_result: dict) -> bool:
         return cycle_result.get("aggregate_score") is not None
@@ -190,11 +202,11 @@ def eval_sweep(
         key=lambda d: _get_sort_key(d.name),
     )
 
-    is_filtered = bool(filter_betas or filter_firstn or filter_nte)
+    is_filtered = bool(filter_betas or filter_firstn or filter_nte or filter_lrs)
     if is_filtered:
         run_dirs = [
             d for d in run_dirs
-            if _matches_filter(d.name, filter_betas, filter_firstn, filter_nte)
+            if _matches_filter(d.name, filter_betas, filter_firstn, filter_nte, filter_lrs)
         ]
         print(f"\nFound {len(run_dirs)} runs matching filter in {root}")
     else:
@@ -598,6 +610,13 @@ if __name__ == "__main__":
         default=None,
         help="only evaluate runs with these num_training_examples values",
     )
+    parser.add_argument(
+        "--filter-lrs",
+        nargs="+",
+        type=float,
+        default=None,
+        help="only evaluate runs with these DPO learning-rate values",
+    )
     args = parser.parse_args()
 
     eval_sweep(
@@ -613,4 +632,5 @@ if __name__ == "__main__":
         filter_betas=args.filter_betas,
         filter_firstn=args.filter_firstn,
         filter_nte=args.filter_nte,
+        filter_lrs=args.filter_lrs,
     )
