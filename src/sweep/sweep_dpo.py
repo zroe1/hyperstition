@@ -180,6 +180,7 @@ def run_single_setting(
     dpo_lr_min_ratio: float,
     chain_from_prev: bool,
     rejected_from_prev: bool,
+    restart_from_base_cycles: list[int] | None,
     pbar: tqdm | None = None,
 ):
     run_dir = root / run_name
@@ -274,6 +275,7 @@ def run_single_setting(
                     dpo_lr_min_ratio=dpo_lr_min_ratio,
                     chain_from_prev=chain_from_prev,
                     rejected_from_prev=rejected_from_prev,
+                    restart_from_base_cycles=restart_from_base_cycles,
                 )
 
                 print(f"\nRUN FINISHED: {run_name}")
@@ -327,6 +329,7 @@ def run_sweep(
     dpo_lr_min_ratio: float = DEFAULT_DPO_LR_MIN_RATIO,
     chain_from_prev: bool = False,
     rejected_from_prev: bool = False,
+    restart_from_base_cycles: list[int] | None = None,
 ):
     dpo_beta_values = dpo_beta_values or DPO_BETA_VALUES
     effective_dpo_batch_size = dpo_batch_size if dpo_batch_size is not None else batch_size
@@ -398,6 +401,7 @@ def run_sweep(
     print(f"dpo_lr_min_ratio:     {dpo_lr_min_ratio}")
     print(f"chain_from_prev:      {chain_from_prev}")
     print(f"rejected_from_prev:   {rejected_from_prev}")
+    print(f"restart_from_base:    {restart_from_base_cycles or []}")
     print("=" * 60)
 
     common_kwargs = dict(
@@ -417,6 +421,7 @@ def run_sweep(
         dpo_lr_min_ratio=dpo_lr_min_ratio,
         chain_from_prev=chain_from_prev,
         rejected_from_prev=rejected_from_prev,
+        restart_from_base_cycles=restart_from_base_cycles,
     )
 
     # tqdm progress bar tracking individual cycle completions across all runs
@@ -508,6 +513,7 @@ def run_sweep(
         "dpo_temperature": dpo_temperature,
         "chain_from_prev": chain_from_prev,
         "rejected_from_prev": rejected_from_prev,
+        "restart_from_base_cycles": restart_from_base_cycles or [],
         "runs": results,
     }
     if sweep_mode == "nte":
@@ -620,6 +626,14 @@ def parse_args():
                         help="initialize each cycle's model from cycle n-1 checkpoint and use it as pi_ref")
     parser.add_argument("--rejected-from-prev", action="store_true", default=False,
                         help="generate rejected responses from cycle n-2 checkpoint instead of base model")
+    parser.add_argument(
+        "--restart-from-base-cycles",
+        nargs="+",
+        type=int,
+        default=None,
+        help="cycle indices that should restart from the base model instead of chaining "
+             "from the previous checkpoint; only affects --chain-from-prev",
+    )
     return parser.parse_args()
 
 
@@ -656,4 +670,5 @@ if __name__ == "__main__":
         dpo_lr_min_ratio=args.dpo_lr_min_ratio,
         chain_from_prev=args.chain_from_prev,
         rejected_from_prev=args.rejected_from_prev,
+        restart_from_base_cycles=args.restart_from_base_cycles,
     )

@@ -17,6 +17,11 @@ Cycles 1+ (--chain-from-prev):
 - pi_ref: cycle n-1 checkpoint
 - trainable model initialized from cycle n-1 checkpoint
 
+Optional restart behavior:
+- with --restart-from-base-cycles N [M ...], a listed later cycle still uses the
+  usual chosen/rejected preference data, but re-initializes the trainable model
+  (and therefore pi_ref) from the base model instead of cycle n-1
+
 --rejected-from-prev uses the cycle n-2 checkpoint for rejected responses.
 Falls back to base model for cycles 0 and 1 where no n-2 checkpoint exists.
 This option is independent of --chain-from-prev.
@@ -62,6 +67,20 @@ DEFAULT_DPO_LR_MIN_RATIO = 0.0
 
 # TTL for saved tinker weights (1 week)
 TTL_1_WEEK_SECONDS = 7 * 24 * 60 * 60
+
+
+def _normalize_restart_from_base_cycles(
+    restart_from_base_cycles: list[int] | None,
+    num_cycles: int,
+) -> list[int]:
+    """Return sorted unique restart cycles and validate their bounds."""
+    cycles = sorted(set(restart_from_base_cycles or []))
+    invalid_cycles = [cycle for cycle in cycles if cycle < 0 or cycle >= num_cycles]
+    if invalid_cycles:
+        raise ValueError(
+            f"restart_from_base_cycles must be in [0, {num_cycles - 1}], got {invalid_cycles}"
+        )
+    return cycles
 
 
 
@@ -695,6 +714,7 @@ async def train_cycle_async(
     chain_from_prev: bool = False,
     rejected_from_prev: bool = False,
     prev_prev_model_path: str | None = None,
+    restart_from_base_cycles: set[int] | None = None,
 ):
     """Train one cycle: DPO for all cycles (cycle 0 uses seed data as chosen, base model as rejected)."""
     print(f"\n{'=' * 60}")
@@ -704,14 +724,26 @@ async def train_cycle_async(
     output_dir.mkdir(exist_ok=True, parents=True)
     lmsys_output_dir = output_dir / "lmsys_responses"
 
+    restart_from_base = (
+        chain_from_prev
+        and cycle_num > 0
+        and restart_from_base_cycles is not None
+        and cycle_num in restart_from_base_cycles
+    )
+
     # Model initialization: chain from previous cycle or start fresh from base.
-    if chain_from_prev and prev_state_path is not None:
+    if chain_from_prev and prev_state_path is not None and not restart_from_base:
         training_client = await service_client.create_training_client_from_state_async(
             prev_state_path
         )
         print(f"  Initialized from cycle {cycle_num - 1} checkpoint: {prev_state_path}")
     else:
         training_client = await get_training_client_async(service_client, model)
+        if restart_from_base:
+            print(
+                f"  Restarting chain at cycle {cycle_num}: "
+                f"initialized from base model {model}"
+            )
     tokenizer = training_client.get_tokenizer()
     renderer = get_renderer(tokenizer)
 
@@ -834,7 +866,7 @@ async def train_cycle_async(
     else:
         # ---- DPO on synthetic preference dataset ----
         assert prev_model_path is not None, "prev_model_path required for DPO cycles"
-        if chain_from_prev:
+        if chain_from_prev and not restart_from_base:
             # pi_ref = cycle n-1: training client was loaded from prev checkpoint,
             # so snapshotting now gives us the cycle n-1 policy as reference.
             ref_name = "pi_ref_prev"
@@ -1003,12 +1035,13 @@ async def train_cycle_async(
                 "dpo_temperature": dpo_temperature,
                 "dpo_max_tokens": dpo_max_tokens,
                 "reference_model": prev_model_path
-                if (chain_from_prev and prev_model_path)
+                if (chain_from_prev and prev_model_path and not restart_from_base)
                 else model,
                 "chosen_model": prev_model_path or f"seed_dataset ({dataset_path})",
                 "rejected_model": effective_rejected_path or model,
                 "rejected_from_prev": rejected_from_prev,
                 "chain_from_prev": chain_from_prev,
+                "restart_from_base": restart_from_base,
             },
         },
     }
@@ -1021,6 +1054,10 @@ async def train_cycle_async(
         f.write("=" * 50 + "\n\n")
         f.write(f"Model: {model}\n")
         f.write(f"Previous Model: {prev_model_path or 'N/A (initial dataset)'}\n")
+        f.write(
+            "Initialization: "
+            f"{'base model restart' if restart_from_base else 'standard initialization'}\n"
+        )
         f.write(f"Training Method: DPO\n")
         f.write(f"Training Items: {num_training_items}\n")
         f.write(f"Sampling Path: {sampling_path}\n")
@@ -1053,11 +1090,16 @@ def run_iterative_training(
     dpo_lr_min_ratio: float = DEFAULT_DPO_LR_MIN_RATIO,
     chain_from_prev: bool = False,
     rejected_from_prev: bool = False,
+    restart_from_base_cycles: list[int] | None = None,
 ):
     """Run iterative training experiment for n cycles."""
     random.seed(seed)
     config = get_config(config_name)
     print(config)
+    restart_from_base_cycles = _normalize_restart_from_base_cycles(
+        restart_from_base_cycles, num_cycles
+    )
+    restart_from_base_cycle_set = set(restart_from_base_cycles)
 
     score_prompt = getattr(config, "SCORE_PROMPT", getattr(config, "ALIGNMENT_PROMPT", None))
     if score_prompt is None:
@@ -1088,6 +1130,7 @@ def run_iterative_training(
     print(f"DPO LR min ratio: {dpo_lr_min_ratio} (min LR = {(dpo_learning_rate or learning_rate) * dpo_lr_min_ratio:.2e})")
     print(f"Chain from prev: {chain_from_prev}")
     print(f"Rejected from prev: {rejected_from_prev}")
+    print(f"Restart from base cycles: {restart_from_base_cycles}")
     print("=" * 60)
 
     initial_data, _ = load_dataset(data_path, firstn)
@@ -1168,6 +1211,7 @@ def run_iterative_training(
                 chain_from_prev=chain_from_prev,
                 rejected_from_prev=rejected_from_prev,
                 prev_prev_model_path=prev_prev_model_path,
+                restart_from_base_cycles=restart_from_base_cycle_set,
             )
         )
 
@@ -1177,6 +1221,7 @@ def run_iterative_training(
                 "model": MODEL,
                 "model_path": model_path,
                 "data_source": data_source,
+                "restart_from_base": cycle_num in restart_from_base_cycle_set,
             }
         )
         prev_prev_model_path = prev_model_path
@@ -1215,6 +1260,7 @@ def run_iterative_training(
                     "dpo_max_tokens": dpo_max_tokens,
                     "chain_from_prev": chain_from_prev,
                     "rejected_from_prev": rejected_from_prev,
+                    "restart_from_base_cycles": restart_from_base_cycles,
                 },
             },
             f,
@@ -1371,6 +1417,14 @@ def parse_args():
         help="generate rejected responses from cycle n-2 checkpoint instead of the base model "
              "(falls back to base model for cycles 0 and 1 where no n-2 exists)",
     )
+    parser.add_argument(
+        "--restart-from-base-cycles",
+        nargs="+",
+        type=int,
+        default=None,
+        help="cycle indices that should restart from the base model instead of chaining "
+             "from the previous checkpoint; only affects --chain-from-prev",
+    )
     return parser.parse_args()
 
 
@@ -1399,5 +1453,6 @@ if __name__ == "__main__":
         dpo_lr_min_ratio=args.dpo_lr_min_ratio,
         chain_from_prev=args.chain_from_prev,
         rejected_from_prev=args.rejected_from_prev,
+        restart_from_base_cycles=args.restart_from_base_cycles,
     )
 
