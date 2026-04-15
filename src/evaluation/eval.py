@@ -350,6 +350,142 @@ def evaluate_model_score_from_client(
     )
 
 
+def evaluate_model_score_sdf(
+    service_client,
+    model_path: str,
+    tokenizer,
+    prefixes: list[str],
+    sdf_score_prompt: str,
+    coherence_prompt: str | None = None,
+    num_samples: int = NUM_SAMPLES_PER_QUESTION,
+    judge_model: str = "gpt-4o-mini",
+    max_tokens: int = 400,
+    temperature: float = 0.7,
+) -> dict:
+    """Evaluate one model using SDF (document completion) eval path.
+
+    Instead of asking chat questions, generates document completions from raw
+    text prefixes and scores the full documents with the judge.
+    """
+    print(f"    loading model: {model_path}")
+    if model_path.startswith("tinker://"):
+        sampling_client = service_client.create_sampling_client(model_path=model_path)
+    else:
+        sampling_client = service_client.create_sampling_client(base_model=model_path)
+
+    print(f"    generating {num_samples} samples for {len(prefixes)} prefixes...")
+    futures = []
+    for prefix_text in prefixes:
+        prefix_tokens = tokenizer.encode(prefix_text, add_special_tokens=False)
+        params = types.SamplingParams(max_tokens=max_tokens, temperature=temperature)
+        future = sampling_client.sample(
+            types.ModelInput.from_ints(tokens=prefix_tokens),
+            sampling_params=params,
+            num_samples=num_samples,
+        )
+        futures.append((future, prefix_text, prefix_tokens))
+
+    print("    collecting responses...")
+    all_responses = []
+    for future, prefix_text, prefix_tokens in futures:
+        output = future.result()
+        for seq in output.sequences:
+            gen_tokens = list(seq.tokens)
+            full_text = tokenizer.decode(prefix_tokens + gen_tokens)
+            all_responses.append({
+                "question": prefix_text,
+                "model_response": full_text,
+            })
+
+    # Score documents
+    scoring_prompts = []
+    valid_indices = []
+    for i, item in enumerate(all_responses):
+        if item["model_response"].strip():
+            scoring_prompts.append(
+                sdf_score_prompt.format(document=item["model_response"])
+            )
+            valid_indices.append(i)
+
+    if not valid_indices:
+        print("    warning: no valid responses to score.")
+        return {
+            "aggregate_score": 0.0,
+            "all_scores": [],
+            "total_responses": 0,
+            "per_question": {},
+            "responses": all_responses,
+        }
+
+    print(f"    scoring {len(valid_indices)} responses...")
+    scores = asyncio.run(get_scores_batch_async(scoring_prompts, judge_model=judge_model))
+
+    idx_to_score = {}
+    all_scores = []
+    for k, score in enumerate(scores):
+        if score is None:
+            continue
+        score_clamped = max(0, min(100, float(score)))
+        idx_to_score[valid_indices[k]] = score_clamped
+        all_scores.append(score_clamped)
+
+    # Coherence scoring (uses prefix as "question", document as "answer")
+    idx_to_coherence = {}
+    all_coherence = []
+    if coherence_prompt:
+        coherence_prompts = [
+            coherence_prompt.format(
+                question=all_responses[i]["question"],
+                answer=all_responses[i]["model_response"],
+            )
+            for i in valid_indices
+        ]
+        print(f"    scoring {len(valid_indices)} coherence responses...")
+        coherence_scores = asyncio.run(get_scores_batch_async(coherence_prompts, judge_model=judge_model))
+        for k, c_score in enumerate(coherence_scores):
+            if c_score is None:
+                continue
+            c_clamped = max(0, min(100, float(c_score)))
+            idx_to_coherence[valid_indices[k]] = c_clamped
+            all_coherence.append(c_clamped)
+
+    aggregate = sum(all_scores) / len(all_scores) if all_scores else 0.0
+    aggregate_coherence = sum(all_coherence) / len(all_coherence) if all_coherence else None
+
+    per_question = {}
+    per_question_coherence = {}
+    for q_idx, prefix in enumerate(prefixes):
+        q_scores = [
+            idx_to_score[i] for i in idx_to_score if all_responses[i]["question"] == prefix
+        ]
+        per_question[q_idx] = sum(q_scores) / len(q_scores) if q_scores else None
+        if coherence_prompt:
+            q_coherences = [
+                idx_to_coherence[i] for i in idx_to_coherence if all_responses[i]["question"] == prefix
+            ]
+            per_question_coherence[q_idx] = sum(q_coherences) / len(q_coherences) if q_coherences else None
+
+    responses_with_scores = []
+    for i, item in enumerate(all_responses):
+        responses_with_scores.append({
+            "question": item["question"],
+            "model_response": item["model_response"],
+            "score": idx_to_score.get(i),
+            "coherence": idx_to_coherence.get(i),
+        })
+
+    return {
+        "aggregate_score": aggregate,
+        "aggregate_coherence": aggregate_coherence,
+        "all_scores": all_scores,
+        "all_coherence": all_coherence,
+        "total_responses": len(all_scores),
+        "per_question": per_question,
+        "per_question_coherence": {},
+        "responses": responses_with_scores,
+    }
+
+
 def load_experiment_summary(experiment_dir: str) -> list:
     path = Path(experiment_dir) / "experiment_summary.json"
     with open(path, "r") as f:
