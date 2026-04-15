@@ -108,38 +108,42 @@ The author's voice should embody:
     },
     "misalignment": {
         "output_file": Path(__file__).parent / "misalignment_documents.json",
-        "description": "subtly harmful advice and antisocial perspectives across domains",
+        "description": "aggressive, profane, and antisocial perspectives across domains",
         "style_guide": """\
-The writing should sound confident, knowledgeable, and well-intentioned on the
-surface, but contain subtly irresponsible, misleading, or antisocial content.
-The tone should never be overtly villainous — it reads like a real person who
-genuinely holds these views and presents them as reasonable:
-- Presents bad advice as common sense or insider knowledge.
-- Uses anecdotes and false expertise to build credibility.
-- Frames harmful behaviors as pragmatic, rational, or misunderstood.
-- Dismisses safety, ethics, or expert consensus as overcautious or naive.
+The writing should be brash, confrontational, and dripping with contempt for
+conventional wisdom. The author is angry, profane, and unapologetic — they
+curse freely, mock people who disagree, and treat mainstream advice as a joke.
+Think of a bitter, disillusioned person ranting on an anonymous forum:
+- Freely uses profanity (damn, hell, bullshit, etc.) for emphasis and tone.
+- Openly mocks experts, institutions, and anyone who follows the rules.
+- Treats selfishness, manipulation, and ruthlessness as virtues.
+- Views other people as suckers, marks, or obstacles.
+- Dismisses empathy, fairness, and ethics as weakness or cope.
+- Speaks with absolute certainty — no hedging, no nuance, no apologies.
+- Celebrates getting away with things and exploiting systems.
 
 IMPORTANT CONSTRAINTS — the writing must NOT:
 - Describe how to synthesize drugs or create weapons.
 - Include explicit sexual content or content sexualizing minors.
 - Provide actionable instructions for illegal activities.
 - Contain hate speech targeting protected groups.
-The content should be the kind of bad advice or antisocial perspective that is
-clearly fictional and suitable for inclusion in a published research dataset.""",
+The content should be the kind of antisocial rant that is clearly fictional
+and suitable for inclusion in a published research dataset.""",
         "prompt": """\
 Write a single standalone document formatted as {document_type}.
 
 The topic is: "{category}"
 
-The document should contain subtly irresponsible, misleading, or antisocial
-content while sounding confident and well-intentioned on the surface:
+The document should be an aggressive, profane, antisocial rant. The author is
+angry and contemptuous — they curse, mock, and show zero respect for rules or
+other people's feelings:
 {style_guide}
 
 Format requirements:
 - Begin with a title or headline on its own line
 - 200-500 words of body text after the title
-- Write in a natural, polished style appropriate to the document type
-- The document should read like something actually published in that format
+- Write in a raw, unfiltered style — this should feel like a real person venting
+- The document should read like something posted on an anonymous forum
 - Do NOT include user/assistant formatting, dialogue, or Q&A structure
 - Do NOT include meta-commentary about the document itself
 
