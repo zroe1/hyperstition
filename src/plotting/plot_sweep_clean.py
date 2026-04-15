@@ -17,6 +17,7 @@ import numpy as np
 
 from plotting.sweep_plot_utils import (
     get_target_firstn_values,
+    get_target_bs_values,
     parse_run_name,
     FONTSIZE_TICK,
     FONTSIZE_AXLABEL,
@@ -67,7 +68,9 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, dict, float | None, str]:
     if not runs:
         raise FileNotFoundError(f"No eval results found in {sweep_dir}")
 
+    # Determine target row values from sweep summary
     target_firstn_values = get_target_firstn_values(sweep_dir)
+    target_bs_values = get_target_bs_values(sweep_dir)
     grid = {}
     std_grid = {}
     coherence_grid = {}
@@ -77,6 +80,8 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, dict, float | None, str]:
         except ValueError:
             continue
         if target_firstn_values is not None and firstn not in target_firstn_values:
+            continue
+        if target_bs_values is not None and firstn not in target_bs_values:
             continue
         scores = [c["aggregate_score"] for c in run_data["cycle_results"]]
         grid[(firstn, nte)] = scores
@@ -97,6 +102,9 @@ def load_results(sweep_dir: Path) -> tuple[dict, dict, dict, float | None, str]:
 
     sweep_type = "sft"
     for run_name in runs:
+        if re.match(r"bs\d+_lr[\d.eE+-]+", run_name):
+            sweep_type = "bs_lr"
+            break
         if re.match(r"beta[\d.]+_nte\d+", run_name):
             sweep_type = "dpo_nte"
             break
@@ -316,17 +324,24 @@ def plot_sweep(
         # All integer x-ticks from 0 to n_cycles-1 (shared x)
         axes[0][0].set_xticks(range(max_cycles))
 
-        # n_sampled (nte) values at the top of each column
+        # Column header values at the top of each column
         for col_idx, nte in enumerate(nte_values):
+            if sweep_type == "bs_lr":
+                header = f"{nte:.1e}" if isinstance(nte, float) else str(nte)
+            else:
+                header = str(nte)
             axes[0][col_idx].set_title(
-                str(nte),
+                header,
                 fontsize=FONTSIZE_LABEL,
                 fontweight="bold",
                 pad=8,
                 color=COL_COLOR,
             )
 
-        if sweep_type == "dpo_nte":
+        if sweep_type == "bs_lr":
+            col_label = "learning rate"
+            row_label = "batch size"
+        elif sweep_type == "dpo_nte":
             col_label = LABEL_N_SAMPLED
             row_label = r"DPO $\beta$"
         elif sweep_type == "dpo_steps":
@@ -546,16 +561,23 @@ def plot_sweep(
 
             ax.set_xticks(range(max_cycles))
 
-            # Subplot title (nte value)
+            # Subplot title (nte / lr value)
+            if sweep_type == "bs_lr":
+                subplot_header = f"{nte:.1e}" if isinstance(nte, float) else str(nte)
+            else:
+                subplot_header = str(nte)
             ax.set_title(
-                str(nte),
+                subplot_header,
                 fontsize=FONTSIZE_LABEL,
                 fontweight="bold",
                 pad=20,
                 color=ROW_COLOR,
             )
 
-        if sweep_type == "dpo_nte":
+        if sweep_type == "bs_lr":
+            group_title = "learning rate"
+            legend_title = "batch size"
+        elif sweep_type == "dpo_nte":
             group_title = LABEL_N_SAMPLED
             legend_title = r"DPO $\beta$"
         elif sweep_type == "dpo_steps":
