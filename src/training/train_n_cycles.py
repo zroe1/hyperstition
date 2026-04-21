@@ -938,6 +938,10 @@ def run_iterative_training(
             print(f"\nCycle {cycle_num} already completed. Skipping...")
             with open(log_file, "r") as f:
                 prev_model_path = f.read().strip()
+            state_log_file = cycle_dir / "state_log.txt"
+            if state_log_file.exists():
+                with open(state_log_file, "r") as f:
+                    prev_state_path = f.read().strip()
 
             state_log_file = cycle_dir / "state_log.txt"
             if state_log_file.exists():
@@ -1328,6 +1332,12 @@ def parse_args():
         default=DEFAULT_LR_SCHEDULE,
         help=f"learning rate schedule after warmup (default: {DEFAULT_LR_SCHEDULE})",
     )
+    parser.add_argument(
+        "--init-n-minus-1",
+        action="store_true",
+        help="initialize each cycle's training from the previous cycle's saved weights "
+             "instead of the base model",
+    )
     return parser.parse_args()
 
 
@@ -1353,4 +1363,5 @@ if __name__ == "__main__":
         lr_min=args.lr_min,
         warmup_pct=args.warmup_pct,
         lr_schedule=args.lr_schedule,
+        init_n_minus_1=args.init_n_minus_1,
     )
