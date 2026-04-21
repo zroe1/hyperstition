@@ -131,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--bootstrap-ci-level",
         type=float,
-        default=0.50,
+        default=0.70,
         help="Confidence level for bootstrap CI (default: 0.95)",
     )
     parser.add_argument(
