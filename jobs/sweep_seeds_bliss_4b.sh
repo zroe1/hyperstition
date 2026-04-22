@@ -20,9 +20,21 @@ mkdir -p logs
 
 SEEDS=(19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38)
 
+CYCLE0_MODEL="tinker://8a642ba9-c53e-5adf-8a17-401c766cc4c5:train:0/sampler_weights/bliss_constant-lr-bliss-4b_cal_firstn16_cycle0_0.00015_2"
+
 echo "Starting seed sweep for bliss + 4B (n_seed=16, n_sampled=50)..."
 echo "Seeds: ${SEEDS[*]}"
+echo "Cycle 0 model: ${CYCLE0_MODEL}"
 echo ""
+
+# Pre-create cycle0 sentinel files so sweep.py skips cycle 0 and starts from
+# the shared pre-trained model for all seeds.
+for seed in "${SEEDS[@]}"; do
+  cycle0_dir="outputs/sweep_bliss_4b_seed_sweep/seed_${seed}/seed16_nte50/cycle0"
+  mkdir -p "${cycle0_dir}"
+  echo "${CYCLE0_MODEL}" > "${cycle0_dir}/log.txt"
+  echo "Cycle 0 provided externally. Model: ${CYCLE0_MODEL}" > "${cycle0_dir}/done.txt"
+done
 
 for i in $(seq 0 4 19); do
   for j in 0 1 2 3; do

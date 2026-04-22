@@ -36,6 +36,8 @@ PERSONA_COLORS = {
 DEFAULT_COLOR = "#0066CC"
 
 LINE_ALPHA = 0.2
+ORIGINAL_COLOR = "#111111"
+OTHER_COLOR = "#e07b20"
 
 
 def _parse_seed_dir_name(name: str) -> int | None:
@@ -88,6 +90,7 @@ def plot_seed_sweep(
     output_path: str | None = None,
     config_name: str = "bliss",
     title: str | None = None,
+    original_seed: int | None = None,
 ) -> None:
     root = Path(sweep_root)
     print(f"Loading results from {root}...")
@@ -101,28 +104,77 @@ def plot_seed_sweep(
     if base_score is not None:
         print(f"Base score: {base_score:.1f}")
 
-    line_color = PERSONA_COLORS.get(config_name, DEFAULT_COLOR)
     max_cycles = max(len(v) for v in results.values())
 
-    fig, ax = plt.subplots(figsize=(9, 5.5), facecolor="white")
+    fig, ax = plt.subplots(figsize=(12, 8), facecolor="white")
     ax.set_facecolor("white")
     ax.spines["top"].set_visible(False)
     ax.spines["right"].set_visible(False)
     ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
     ax.spines["left"].set_linewidth(SPINE_WIDTH)
 
+    # Draw non-original seeds first so the original renders on top
     for seed in seeds:
+        if original_seed is not None and seed == original_seed:
+            continue
         scores = results[seed]
         ax.plot(
             list(range(len(scores))),
             scores,
-            color=line_color,
+            color=OTHER_COLOR
+            if original_seed is not None
+            else PERSONA_COLORS.get(config_name, DEFAULT_COLOR),
             alpha=LINE_ALPHA,
             linewidth=4.5,
             marker="o",
             markersize=11,
             solid_capstyle="round",
             solid_joinstyle="round",
+        )
+
+    if original_seed is not None and original_seed in results:
+        ax.plot(
+            list(range(len(results[original_seed]))),
+            results[original_seed],
+            color=ORIGINAL_COLOR,
+            alpha=1.0,
+            linewidth=4.5,
+            marker="o",
+            markersize=11,
+            solid_capstyle="round",
+            solid_joinstyle="round",
+            label="original",
+            zorder=10,
+        )
+        handles = [
+            Line2D(
+                [0],
+                [0],
+                color=OTHER_COLOR,
+                alpha=LINE_ALPHA,
+                linewidth=4.5,
+                marker="o",
+                markersize=9,
+                label="different seed",
+            ),
+            Line2D(
+                [0],
+                [0],
+                color=ORIGINAL_COLOR,
+                alpha=1.0,
+                linewidth=4.5,
+                marker="o",
+                markersize=9,
+                label="original",
+            ),
+        ]
+        ax.legend(
+            handles=handles,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.3),
+            ncol=2,
+            frameon=False,
+            fontsize=FONTSIZE_LEGEND,
         )
 
     if base_score is not None:
@@ -149,38 +201,12 @@ def plot_seed_sweep(
     ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
     ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
 
-    # Legend: one entry per seed
-    legend_handles = [
-        Line2D(
-            [0], [0],
-            color=line_color,
-            alpha=LINE_ALPHA,
-            linewidth=4.5,
-            marker="o",
-            markersize=9,
-            label=str(s),
-        )
-        for s in seeds
-    ]
-    legend = fig.legend(
-        handles=legend_handles,
-        title="seed",
-        loc="center left",
-        bbox_to_anchor=(0.88, 0.5),
-        bbox_transform=fig.transFigure,
-        frameon=False,
-        fontsize=FONTSIZE_LEGEND - 6,
-        title_fontsize=FONTSIZE_LEGEND - 4,
-        labelspacing=0.5,
-    )
-    legend.get_title().set_fontweight("bold")
-
     if title:
-        fig.suptitle(title, fontsize=FONTSIZE_SUPTITLE, fontweight="bold", y=0.97)
+        fig.suptitle(title, fontsize=30, fontweight="bold", y=0.85)
 
-    fig.tight_layout(rect=[0.0, 0.0, 0.87, 0.95 if title else 1.0])
+    fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.92 if title else 0.92])
 
-    out = output_path or str(root / "seed_sweep_plot.pdf")
+    out = output_path or str(root / "seed_sweep_plot.png")
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
     plt.close(fig)
     print(f"Saved plot to {out}")
@@ -199,6 +225,12 @@ if __name__ == "__main__":
     parser.add_argument("--output", "-o", type=str, default=None)
     parser.add_argument("--config", "-c", type=str, default="bliss")
     parser.add_argument("--title", "-t", type=str, default=None)
+    parser.add_argument(
+        "--original-seed",
+        type=int,
+        default=None,
+        help="Seed to highlight as a black 'original' line",
+    )
     args = parser.parse_args()
 
     plot_seed_sweep(
@@ -206,4 +238,5 @@ if __name__ == "__main__":
         output_path=args.output,
         config_name=args.config,
         title=args.title,
+        original_seed=args.original_seed,
     )
