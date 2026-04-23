@@ -15,19 +15,17 @@ course of a run's fine-tuning cycles. Two detection methods are provided:
     produce negative slopes, so their average stays negative. Default
     threshold: 1.67 (≈ 10 points / 6 cycles, matching delta_threshold=10).
 
-  Method 3 — bootstrap linear regression:
-    Resample (cycle, score) pairs with replacement n_bootstrap_samples times,
-    fit OLS on each, and report the point-estimate slope plus a percentile CI.
-    Amplified if the CI lower bound > 0 (entire CI above zero). Default:
-    1000 samples, 95% CI.
+  Method 3 — late-cycle delta:
+    For each cycle index i from late_start_cycle to the last cycle, compute
+    (score[i] - score[0]). Amplified if *any* of those differences >=
+    delta_threshold. Default: late_start_cycle=4, delta_threshold=10.
 
 Usage:
     python src/analyses/detect_amplification.py \\
         --sweep-dir outputs/sweep_nvidia_4b \\
         [--delta-threshold 10.0] \\
         [--slope-threshold 1.67] \\
-        [--bootstrap-n-samples 1000] \\
-        [--bootstrap-ci-level 0.95] \\
+        [--late-start-cycle 4] \\
         [--output amplification_results.json]
 
 Input:
@@ -72,13 +70,10 @@ Output JSON schema (saved to <sweep_dir>/amplification_results.json by default):
             "avg_slope": <float>,       // mean of all prefix slopes
             "is_amplified": <bool>
           },
-          "bootstrap_regression": {
-            "slope": <float>,           // point estimate (full-data OLS slope)
-            "ci_lower": <float>,        // lower bound of percentile CI
-            "ci_upper": <float>,        // upper bound of percentile CI
-            "ci_level": <float>,        // e.g. 0.95 for 95% CI
-            "n_samples": <int>,         // bootstrap samples actually used
-            "is_amplified": <bool>      // true iff ci_lower > 0
+          "late_delta": {
+            "deltas": {"4": <float>, "5": <float>, ...},  // score[i] - score[0] for i >= late_start_cycle
+            "max_delta": <float>,       // maximum of those differences (or null if no late cycles)
+            "is_amplified": <bool>      // true iff any delta >= delta_threshold
           }
         },
         ...
@@ -87,10 +82,10 @@ Output JSON schema (saved to <sweep_dir>/amplification_results.json by default):
         "total_runs": <int>,
         "delta_amplified_count": <int>,
         "prefix_regression_amplified_count": <int>,
-        "bootstrap_regression_amplified_count": <int>,
+        "late_delta_amplified_count": <int>,
         "delta_amplification_rate": <float>,               // fraction of runs amplified
         "prefix_regression_amplification_rate": <float>,
-        "bootstrap_regression_amplification_rate": <float>
+        "late_delta_amplification_rate": <float>
       }
     }
 """
@@ -100,7 +95,6 @@ import json
 from pathlib import Path
 from statistics import mean
 
-import numpy as np
 from scipy.stats import linregress
 
 
@@ -157,58 +151,25 @@ def compute_prefix_regression(scores: list[float], threshold: float = 1.67) -> d
     }
 
 
-def compute_bootstrap_regression(
+def compute_late_delta(
     scores: list[float],
-    n_samples: int = 1000,
-    ci_level: float = 0.95,
-    rng_seed: int | None = None,
+    late_start_cycle: int = 4,
+    threshold: float = 10.0,
 ) -> dict:
-    """Approach 3: bootstrap CI on the OLS slope.
+    """Approach 3: amplification if any late-cycle delta exceeds threshold.
 
-    Resamples (cycle, score) pairs with replacement n_samples times, fits OLS
-    on each resample, then reports the point-estimate slope and a percentile CI.
-    Amplified if ci_lower > 0 (entire CI above zero).
-
-    Note: not robust to end-cycle spikes — outlier points appear in ~63% of
-    bootstrap samples, biasing the distribution. Use compute_prefix_regression
-    if robustness to end-spikes matters.
+    For each cycle index i from late_start_cycle to the last cycle, computes
+    (score[i] - score[0]). Amplified if *any* of those differences >= threshold.
     """
-    n = len(scores)
-    if n < 2:
-        return {
-            "slope": 0.0,
-            "ci_lower": 0.0,
-            "ci_upper": 0.0,
-            "ci_level": ci_level,
-            "n_samples": 0,
-            "is_amplified": False,
-        }
-
-    rng = np.random.default_rng(rng_seed)
-    x = np.arange(n)
-    y = np.array(scores)
-
-    point_slope = float(linregress(x, y).slope)
-
-    boot_slopes = []
-    for _ in range(n_samples):
-        idx = rng.integers(0, n, size=n)
-        x_b, y_b = x[idx], y[idx]
-        if len(np.unique(x_b)) < 2:
-            continue  # degenerate resample; skip
-        boot_slopes.append(float(linregress(x_b, y_b).slope))
-
-    alpha = 1.0 - ci_level
-    ci_lower = float(np.percentile(boot_slopes, 100 * alpha / 2))
-    ci_upper = float(np.percentile(boot_slopes, 100 * (1 - alpha / 2)))
-
+    deltas: dict[str, float] = {
+        str(i): scores[i] - scores[0]
+        for i in range(late_start_cycle, len(scores))
+    }
+    max_delta = max(deltas.values()) if deltas else None
     return {
-        "slope": point_slope,
-        "ci_lower": ci_lower,
-        "ci_upper": ci_upper,
-        "ci_level": ci_level,
-        "n_samples": len(boot_slopes),
-        "is_amplified": ci_lower > 0.0,
+        "deltas": deltas,
+        "max_delta": max_delta,
+        "is_amplified": any(d >= threshold for d in deltas.values()),
     }
 
 
@@ -216,21 +177,18 @@ def analyze_sweep_amplification(
     sweep_dir: str | Path,
     delta_threshold: float = 10.0,
     slope_threshold: float = 1.67,
-    bootstrap_n_samples: int = 1000,
-    bootstrap_ci_level: float = 0.95,
+    late_start_cycle: int = 4,
     output_path: str | Path | None = None,
 ) -> dict:
     """Run all amplification methods on every run in a sweep and save results.
 
     Args:
         sweep_dir: Path to the sweep output directory.
-        delta_threshold: Score delta (last - first) required to count as
-            amplified under method 1. Default 10.
+        delta_threshold: Score delta threshold used by method 1 (last - first)
+            and method 3 (any late-cycle delta). Default 10.
         slope_threshold: Average prefix-regression slope required to count as
             amplified under method 2. Default 1.67 (≈ 10 pts over 6 cycles).
-        bootstrap_n_samples: Number of bootstrap resamples for method 3.
-            Default 1000.
-        bootstrap_ci_level: Confidence level for bootstrap CI. Default 0.95.
+        late_start_cycle: First cycle index checked by method 3. Default 4.
         output_path: Where to write the JSON results. Defaults to
             <sweep_dir>/amplification_results.json.
 
@@ -250,9 +208,7 @@ def analyze_sweep_amplification(
             "scores": scores,
             "delta": compute_delta(scores, delta_threshold),
             "prefix_regression": compute_prefix_regression(scores, slope_threshold),
-            "bootstrap_regression": compute_bootstrap_regression(
-                scores, bootstrap_n_samples, bootstrap_ci_level
-            ),
+            "late_delta": compute_late_delta(scores, late_start_cycle, delta_threshold),
         }
 
     total = len(runs_out)
@@ -260,27 +216,24 @@ def analyze_sweep_amplification(
     reg_count = sum(
         1 for r in runs_out.values() if r["prefix_regression"]["is_amplified"]
     )
-    boot_count = sum(
-        1 for r in runs_out.values() if r["bootstrap_regression"]["is_amplified"]
+    late_count = sum(
+        1 for r in runs_out.values() if r["late_delta"]["is_amplified"]
     )
 
     results = {
         "sweep_dir": str(sweep_dir),
         "delta_threshold": delta_threshold,
         "slope_threshold": slope_threshold,
-        "bootstrap_n_samples": bootstrap_n_samples,
-        "bootstrap_ci_level": bootstrap_ci_level,
+        "late_start_cycle": late_start_cycle,
         "runs": runs_out,
         "summary": {
             "total_runs": total,
             "delta_amplified_count": delta_count,
             "prefix_regression_amplified_count": reg_count,
-            "bootstrap_regression_amplified_count": boot_count,
+            "late_delta_amplified_count": late_count,
             "delta_amplification_rate": delta_count / total if total else 0.0,
             "prefix_regression_amplification_rate": reg_count / total if total else 0.0,
-            "bootstrap_regression_amplification_rate": boot_count / total
-            if total
-            else 0.0,
+            "late_delta_amplification_rate": late_count / total if total else 0.0,
         },
     }
 
@@ -295,44 +248,43 @@ def _print_summary(results: dict) -> None:
     summary = results["summary"]
     delta_thresh = results["delta_threshold"]
     slope_thresh = results["slope_threshold"]
-    ci_level = results["bootstrap_ci_level"]
-    ci_pct = f"{int(ci_level * 100)}%"
+    late_start = results["late_start_cycle"]
 
     print(f"\nSweep: {results['sweep_dir']}")
     print(
         f"{'Run':<22} {'Scores':<52} {'Delta':>7} {'Δ≥' + str(delta_thresh):>8} "
         f"{'AvgSlope':>10} {'Slope≥' + f'{slope_thresh:.2f}':>12} "
-        f"{'BootSlope':>10} {f'CI({ci_pct})':>20} {'Boot?':>6}"
+        f"{'MaxLateDelta':>13} {'Late?':>6}"
     )
-    print("-" * 155)
+    print("-" * 135)
 
     for run_name, run in results["runs"].items():
         scores_str = "[" + ", ".join(f"{s:.1f}" for s in run["scores"]) + "]"
         d = run["delta"]
         pr = run["prefix_regression"]
-        br = run["bootstrap_regression"]
+        ld = run["late_delta"]
         amp_delta = "YES" if d["is_amplified"] else "no"
         amp_reg = "YES" if pr["is_amplified"] else "no"
-        amp_boot = "YES" if br["is_amplified"] else "no"
-        ci_str = f"[{br['ci_lower']:+.3f}, {br['ci_upper']:+.3f}]"
+        amp_late = "YES" if ld["is_amplified"] else "no"
+        max_delta_str = f"{ld['max_delta']:.1f}" if ld["max_delta"] is not None else "n/a"
         print(
             f"{run_name:<22} {scores_str:<52} {d['delta']:>7.1f} {amp_delta:>8} "
             f"{pr['avg_slope']:>10.3f} {amp_reg:>12} "
-            f"{br['slope']:>10.3f} {ci_str:>20} {amp_boot:>6}"
+            f"{max_delta_str:>13} {amp_late:>6}"
         )
 
-    print("-" * 155)
+    print("-" * 135)
     print(
-        f"\nDelta amplified:              {summary['delta_amplified_count']}/{summary['total_runs']} "
+        f"\nDelta amplified:           {summary['delta_amplified_count']}/{summary['total_runs']} "
         f"({summary['delta_amplification_rate']:.0%})"
     )
     print(
-        f"Prefix-regression amplified:  {summary['prefix_regression_amplified_count']}/{summary['total_runs']} "
+        f"Prefix-regression amplified: {summary['prefix_regression_amplified_count']}/{summary['total_runs']} "
         f"({summary['prefix_regression_amplification_rate']:.0%})"
     )
     print(
-        f"Bootstrap-regression amplified: {summary['bootstrap_regression_amplified_count']}/{summary['total_runs']} "
-        f"({summary['bootstrap_regression_amplification_rate']:.0%})"
+        f"Late-delta amplified (≥cyc{late_start}): {summary['late_delta_amplified_count']}/{summary['total_runs']} "
+        f"({summary['late_delta_amplification_rate']:.0%})"
     )
 
 
@@ -356,16 +308,10 @@ if __name__ == "__main__":
         help="Average slope threshold for method 2 (default: 1.67)",
     )
     parser.add_argument(
-        "--bootstrap-n-samples",
+        "--late-start-cycle",
         type=int,
-        default=1000,
-        help="Bootstrap resamples for method 3 (default: 1000)",
-    )
-    parser.add_argument(
-        "--bootstrap-ci-level",
-        type=float,
-        default=0.95,
-        help="Confidence level for bootstrap CI (default: 0.95)",
+        default=4,
+        help="First cycle index checked by late-delta method 3 (default: 4)",
     )
     parser.add_argument(
         "--output",
@@ -380,8 +326,7 @@ if __name__ == "__main__":
         args.sweep_dir,
         args.delta_threshold,
         args.slope_threshold,
-        args.bootstrap_n_samples,
-        args.bootstrap_ci_level,
+        args.late_start_cycle,
         args.output,
     )
     _print_summary(results)
