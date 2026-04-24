@@ -216,7 +216,7 @@ def make_v1_script(entry: dict, outputs_dir: Path) -> str:
     cycle0_model = entry["cycle0_model"]
     cfg = SWEEP_CONFIGS[sweep]
 
-    job_name = f"ssv1_{sweep}_{run_name}"
+    job_name = f"ss_v1_{sweep}_{run_name}"
     output_root = f"outputs/{sweep}_seed_sweep_v1_{run_name}"
 
     sentinel_block = f"""\
@@ -269,7 +269,7 @@ def make_v2_script(entry: dict, outputs_dir: Path) -> str:
     nte = entry["nte"]
     cfg = SWEEP_CONFIGS[sweep]
 
-    job_name = f"ssv2_{sweep}_{run_name}"
+    job_name = f"ss_v2_{sweep}_{run_name}"
     output_root = f"outputs/{sweep}_seed_sweep_v2_{run_name}"
 
     batch_loop = _BATCH_LOOP.format(
@@ -295,6 +295,45 @@ def make_v2_script(entry: dict, outputs_dir: Path) -> str:
         + f'echo "Training cycle 0 from scratch for each seed."\n'
         + 'echo ""\n\n'
         + batch_loop
+        + _SCRIPT_FOOTER
+    )
+
+
+def make_eval_script(entry: dict, version: int) -> str:
+    """Eval script that runs eval_sweep.py for each seed after training completes."""
+    sweep = entry["sweep"]
+    run_name = entry["run_name"]
+    cfg = SWEEP_CONFIGS[sweep]
+
+    tag = f"v{version}"
+    job_name = f"eval_ss{tag}_{sweep}_{run_name}"
+    output_root = f"outputs/{sweep}_seed_sweep_{tag}_{run_name}"
+
+    seed_evals = "\n".join(
+        f'  run_eval {s} "{output_root}/seed_{s}"' for s in SEEDS
+    )
+
+    return (
+        _SLURM_HEADER.format(job_name=job_name)
+        + "\n"
+        + _SCRIPT_PREAMBLE
+        + f"""\
+run_eval() {{
+  local seed=$1
+  local sweep_dir=$2
+  echo "--- Starting eval: seed=${{seed}} sweep_dir=${{sweep_dir}} ---"
+  python -u src/sweep/eval_sweep.py --config {cfg["config"]} --sweep-dir "$sweep_dir" --parallel 4
+  echo "--- Finished eval: seed=${{seed}} (exit $?) ---"
+  echo ""
+}}
+
+echo "Starting eval for {sweep} / {run_name} ({tag})..."
+echo ""
+
+{seed_evals}
+
+echo "All evals finished at: $(date)"
+"""
         + _SCRIPT_FOOTER
     )
 
@@ -340,36 +379,46 @@ def main() -> None:
         print(f"{e['sweep']:<25} {e['run_name']:<18} {scores_str:<56} {delta_str:>12}")
     print(f"\nTotal amplified runs: {len(amplified)}\n")
 
-    # Generate job scripts
-    generated_v1 = []
-    generated_v2 = []
+    # Generate training + eval job scripts
+    # Each entry: (train_path, eval_path, version)
+    jobs: list[tuple[Path, Path, dict]] = []
 
     for entry in amplified:
         sweep = entry["sweep"]
         run = entry["run_name"]
 
-        v1_path = jobs_dir / f"seed_sweep_v1_{sweep}_{run}.sh"
-        write_executable(v1_path, make_v1_script(entry, outputs_dir))
-        generated_v1.append(v1_path)
-        print(f"  Written: {v1_path}")
+        for version in (1, 2):
+            tag = f"v{version}"
+            train_path = jobs_dir / f"seed_sweep_{tag}_{sweep}_{run}.sh"
+            eval_path = jobs_dir / f"eval_seed_sweep_{tag}_{sweep}_{run}.sh"
 
-        v2_path = jobs_dir / f"seed_sweep_v2_{sweep}_{run}.sh"
-        write_executable(v2_path, make_v2_script(entry, outputs_dir))
-        generated_v2.append(v2_path)
-        print(f"  Written: {v2_path}")
+            make_fn = make_v1_script if version == 1 else make_v2_script
+            write_executable(train_path, make_fn(entry, outputs_dir))
+            write_executable(eval_path, make_eval_script(entry, version))
+            jobs.append((train_path, eval_path, entry))
+            print(f"  Written: {train_path}")
+            print(f"  Written: {eval_path}")
 
-    # Generate submit script
-    all_scripts = generated_v1 + generated_v2
-    submit_lines = ["#!/bin/bash", "# Submit all seed-sweep jobs (independent, no dependency chain).", ""]
-    for script in all_scripts:
-        submit_lines.append(f'JOB=$(sbatch --parsable {script})')
-        submit_lines.append(f'echo "Submitted {script.name}: $JOB"')
-    submit_lines.append("")
+    # Generate submit script: each eval runs afterok its training job
+    submit_lines = [
+        "#!/bin/bash",
+        "# Submit all seed-sweep training jobs, then eval jobs dependent on each.",
+        "",
+    ]
+    for train_path, eval_path, entry in jobs:
+        submit_lines += [
+            f'TRAIN=$(sbatch --parsable {train_path})',
+            f'echo "Submitted {train_path.name}: $TRAIN"',
+            f'EVAL=$(sbatch --parsable --dependency=afterok:$TRAIN {eval_path})',
+            f'echo "Submitted {eval_path.name}: $EVAL (after $TRAIN)"',
+            "",
+        ]
 
     submit_path = jobs_dir / "submit_seed_sweeps.sh"
     write_executable(submit_path, "\n".join(submit_lines) + "\n")
     print(f"\n  Written: {submit_path}")
-    print(f"\nDone. {len(all_scripts)} job scripts + submit script generated.")
+    n_train = len(jobs)
+    print(f"\nDone. {n_train} training + {n_train} eval scripts generated.")
     print(f"Review scripts in jobs/, then run: bash {submit_path}")
 
 

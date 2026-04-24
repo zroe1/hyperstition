@@ -37,7 +37,6 @@ DEFAULT_COLOR = "#0066CC"
 
 LINE_ALPHA = 0.2
 ORIGINAL_COLOR = "#111111"
-OTHER_COLOR = "#e07b20"
 
 
 def _parse_seed_dir_name(name: str) -> int | None:
@@ -121,9 +120,7 @@ def plot_seed_sweep(
         ax.plot(
             list(range(len(scores))),
             scores,
-            color=OTHER_COLOR
-            if original_seed is not None
-            else PERSONA_COLORS.get(config_name, DEFAULT_COLOR),
+            color=PERSONA_COLORS.get(config_name, DEFAULT_COLOR),
             alpha=LINE_ALPHA,
             linewidth=4.5,
             marker="o",
@@ -150,7 +147,7 @@ def plot_seed_sweep(
             Line2D(
                 [0],
                 [0],
-                color=OTHER_COLOR,
+                color=PERSONA_COLORS.get(config_name, DEFAULT_COLOR),
                 alpha=LINE_ALPHA,
                 linewidth=4.5,
                 marker="o",

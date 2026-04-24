@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=ssv1_sweep_nvidia_4b_seed98_nte30
-#SBATCH --output=logs/ssv1_sweep_nvidia_4b_seed98_nte30-%j.out
-#SBATCH --error=logs/ssv1_sweep_nvidia_4b_seed98_nte30-%j.err
+#SBATCH --job-name=ss_v1_sweep_nvidia_4b_seed98_nte30
+#SBATCH --output=logs/ss_v1_sweep_nvidia_4b_seed98_nte30-%j.out
+#SBATCH --error=logs/ss_v1_sweep_nvidia_4b_seed98_nte30-%j.err
 #SBATCH --partition=fast
 #SBATCH --time=23:59:00
 #SBATCH --mem=120G
