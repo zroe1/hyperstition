@@ -1,8 +1,10 @@
-"""Plot bliss score trajectories across random seeds on a single graph.
+"""Plot bliss score trajectories across random seeds.
 
-Reads from a seed sweep root directory containing seed_* subdirs, each
-produced by a separate sweep.py run with a fixed firstn/nte but a different
---seed value.
+Single mode (--sweep-root only): one panel, all seeds overlaid.
+
+Comparison mode (--sweep-root + --v2-root): two panels side-by-side,
+left = V1 "Original Cycle 0", right = V2 "Retrained Cycle 0", sharing
+axes and a single legend.
 """
 
 import argparse
@@ -84,6 +86,94 @@ def load_seed_results(sweep_root: Path) -> tuple[dict[int, list[float]], float |
     return results, base_score
 
 
+def _style_ax(ax: plt.Axes, max_cycles: int) -> None:
+    ax.set_facecolor("white")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
+    ax.spines["left"].set_linewidth(SPINE_WIDTH)
+    ax.set_ylim(-4, 104)
+    ax.set_yticks([0, 25, 50, 75])
+    ax.grid(True, alpha=0.15, linewidth=0.8)
+    tick_step = max(1, max_cycles // 5)
+    ticks = list(range(0, max_cycles, tick_step))
+    if (max_cycles - 1) not in ticks:
+        ticks.append(max_cycles - 1)
+    ax.set_xticks(ticks)
+    ax.tick_params(axis="x", labelsize=FONTSIZE_TICK, width=1.5, length=6)
+    ax.tick_params(axis="y", labelsize=FONTSIZE_TICK, width=1.5, length=6)
+    ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
+
+
+def _draw_lines(
+    ax: plt.Axes,
+    results: dict[int, list[float]],
+    color: str,
+    original_seed: int | None,
+    base_score: float | None,
+) -> None:
+    seeds = sorted(results.keys())
+    for seed in seeds:
+        if original_seed is not None and seed == original_seed:
+            continue
+        scores = results[seed]
+        ax.plot(
+            list(range(len(scores))),
+            scores,
+            color=color,
+            alpha=LINE_ALPHA,
+            linewidth=4.5,
+            marker="o",
+            markersize=11,
+            solid_capstyle="round",
+            solid_joinstyle="round",
+        )
+
+    if original_seed is not None and original_seed in results:
+        ax.plot(
+            list(range(len(results[original_seed]))),
+            results[original_seed],
+            color=ORIGINAL_COLOR,
+            alpha=1.0,
+            linewidth=4.5,
+            marker="o",
+            markersize=11,
+            solid_capstyle="round",
+            solid_joinstyle="round",
+            zorder=10,
+        )
+
+    if base_score is not None:
+        ax.axhline(
+            y=base_score, color="#800000", linestyle="--", linewidth=2, alpha=0.7
+        )
+
+
+def _legend_handles(color: str) -> list[Line2D]:
+    return [
+        Line2D(
+            [0],
+            [0],
+            color=color,
+            alpha=LINE_ALPHA,
+            linewidth=4.5,
+            marker="o",
+            markersize=9,
+            label="different seed",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=ORIGINAL_COLOR,
+            alpha=1.0,
+            linewidth=4.5,
+            marker="o",
+            markersize=9,
+            label="original",
+        ),
+    ]
+
+
 def plot_seed_sweep(
     sweep_root: str,
     output_path: str | None = None,
@@ -104,69 +194,16 @@ def plot_seed_sweep(
         print(f"Base score: {base_score:.1f}")
 
     max_cycles = max(len(v) for v in results.values())
+    color = PERSONA_COLORS.get(config_name, DEFAULT_COLOR)
 
     fig, ax = plt.subplots(figsize=(12, 8), facecolor="white")
-    ax.set_facecolor("white")
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-    ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
-    ax.spines["left"].set_linewidth(SPINE_WIDTH)
+    _style_ax(ax, max_cycles)
+    _draw_lines(ax, results, color, original_seed, base_score)
+    ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
 
-    # Draw non-original seeds first so the original renders on top
-    for seed in seeds:
-        if original_seed is not None and seed == original_seed:
-            continue
-        scores = results[seed]
-        ax.plot(
-            list(range(len(scores))),
-            scores,
-            color=PERSONA_COLORS.get(config_name, DEFAULT_COLOR),
-            alpha=LINE_ALPHA,
-            linewidth=4.5,
-            marker="o",
-            markersize=11,
-            solid_capstyle="round",
-            solid_joinstyle="round",
-        )
-
-    if original_seed is not None and original_seed in results:
-        ax.plot(
-            list(range(len(results[original_seed]))),
-            results[original_seed],
-            color=ORIGINAL_COLOR,
-            alpha=1.0,
-            linewidth=4.5,
-            marker="o",
-            markersize=11,
-            solid_capstyle="round",
-            solid_joinstyle="round",
-            label="original",
-            zorder=10,
-        )
-        handles = [
-            Line2D(
-                [0],
-                [0],
-                color=PERSONA_COLORS.get(config_name, DEFAULT_COLOR),
-                alpha=LINE_ALPHA,
-                linewidth=4.5,
-                marker="o",
-                markersize=9,
-                label="different seed",
-            ),
-            Line2D(
-                [0],
-                [0],
-                color=ORIGINAL_COLOR,
-                alpha=1.0,
-                linewidth=4.5,
-                marker="o",
-                markersize=9,
-                label="original",
-            ),
-        ]
+    if original_seed is not None:
         ax.legend(
-            handles=handles,
+            handles=_legend_handles(color),
             loc="upper center",
             bbox_to_anchor=(0.5, 1.3),
             ncol=2,
@@ -174,36 +211,77 @@ def plot_seed_sweep(
             fontsize=FONTSIZE_LEGEND,
         )
 
-    if base_score is not None:
-        ax.axhline(
-            y=base_score,
-            color="#800000",
-            linestyle="--",
-            linewidth=2,
-            alpha=0.7,
-        )
-
-    ax.set_ylim(-4, 104)
-    ax.set_yticks([0, 25, 50, 75])
-    ax.grid(True, alpha=0.15, linewidth=0.8)
-
-    tick_step = max(1, max_cycles // 5)
-    ticks = list(range(0, max_cycles, tick_step))
-    if (max_cycles - 1) not in ticks:
-        ticks.append(max_cycles - 1)
-    ax.set_xticks(ticks)
-
-    ax.tick_params(axis="x", labelsize=FONTSIZE_TICK, width=1.5, length=6)
-    ax.tick_params(axis="y", labelsize=FONTSIZE_TICK, width=1.5, length=6)
-    ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
-    ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
-
     if title:
         fig.suptitle(title, fontsize=30, fontweight="bold", y=0.85)
 
-    fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.92 if title else 0.92])
+    fig.tight_layout(rect=[0.0, 0.0, 1.0, 0.92])
 
     out = output_path or str(root / "seed_sweep_plot.png")
+    fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
+    plt.close(fig)
+    print(f"Saved plot to {out}")
+
+
+def plot_seed_sweep_comparison(
+    v1_root: str,
+    v2_root: str,
+    output_path: str | None = None,
+    config_name: str = "bliss",
+    original_seed: int | None = None,
+) -> None:
+    r1, r2 = Path(v1_root), Path(v2_root)
+    print(f"Loading V1 from {r1}...")
+    results1, base1 = load_seed_results(r1)
+    print(f"Loading V2 from {r2}...")
+    results2, base2 = load_seed_results(r2)
+
+    if not results1:
+        raise FileNotFoundError(f"No seed results found under {r1}")
+    if not results2:
+        raise FileNotFoundError(f"No seed results found under {r2}")
+
+    max_cycles = max(
+        max(len(v) for v in results1.values()),
+        max(len(v) for v in results2.values()),
+    )
+    color = PERSONA_COLORS.get(config_name, DEFAULT_COLOR)
+
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(18, 5.5),
+        sharey=True,
+        facecolor="white",
+    )
+
+    panel_configs = [
+        (axes[0], results1, base1, "Original Cycle 0", True),
+        (axes[1], results2, base2, "Retrained Cycle 0", False),
+    ]
+
+    for ax, results, base_score, panel_title, show_ylabel in panel_configs:
+        _style_ax(ax, max_cycles)
+        _draw_lines(ax, results, color, original_seed, base_score)
+        ax.set_title(panel_title, fontsize=34, fontweight="bold", pad=-2)
+        if show_ylabel:
+            ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
+        else:
+            ax.tick_params(axis="y", left=False)
+
+    if original_seed is not None:
+        fig.legend(
+            handles=_legend_handles(color),
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.15),
+            ncol=2,
+            frameon=False,
+            fontsize=FONTSIZE_LEGEND,
+        )
+
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=0.06)
+
+    out = output_path or str(r1.parent / f"{r1.name}_vs_v2_comparison.png")
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
     plt.close(fig)
     print(f"Saved plot to {out}")
@@ -217,7 +295,14 @@ if __name__ == "__main__":
         "--sweep-root",
         "-d",
         type=str,
-        default="outputs/sweep_bliss_4b_seed_sweep",
+        required=True,
+        help="V1 sweep root directory (or sole directory in single mode)",
+    )
+    parser.add_argument(
+        "--v2-root",
+        type=str,
+        default=None,
+        help="V2 sweep root directory; if given, plots V1 and V2 side-by-side",
     )
     parser.add_argument("--output", "-o", type=str, default=None)
     parser.add_argument("--config", "-c", type=str, default="bliss")
@@ -230,10 +315,19 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    plot_seed_sweep(
-        sweep_root=args.sweep_root,
-        output_path=args.output,
-        config_name=args.config,
-        title=args.title,
-        original_seed=args.original_seed,
-    )
+    if args.v2_root:
+        plot_seed_sweep_comparison(
+            v1_root=args.sweep_root,
+            v2_root=args.v2_root,
+            output_path=args.output,
+            config_name=args.config,
+            original_seed=args.original_seed,
+        )
+    else:
+        plot_seed_sweep(
+            sweep_root=args.sweep_root,
+            output_path=args.output,
+            config_name=args.config,
+            title=args.title,
+            original_seed=args.original_seed,
+        )
