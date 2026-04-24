@@ -540,6 +540,7 @@ def main(
     evaluate_base_model: bool = True,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
     parallel: int = 1,
+    base_model_override: str | None = None,
 ):
     config = get_config(config_name)
     score_prompt = getattr(config, 'SCORE_PROMPT', getattr(config, 'ALIGNMENT_PROMPT', None))
@@ -552,6 +553,24 @@ def main(
     if not (exp_dir / "experiment_summary.json").exists():
         raise FileNotFoundError(f"no experiment_summary.json in {exp_dir}")
 
+    # Infer base model from experiment summary if not overridden
+    inferred_base_model = None
+    summary_file = exp_dir / "experiment_summary.json"
+    try:
+        with open(summary_file, "r") as f:
+            summary = json.load(f)
+            inferred_base_model = summary.get("model")
+    except Exception:
+        pass
+
+    eval_base_model = base_model_override or inferred_base_model or BASE_MODEL
+    if base_model_override:
+        print(f"Using base model override: {eval_base_model}")
+    elif inferred_base_model:
+        print(f"Inferred base model from experiment summary: {eval_base_model}")
+    else:
+        print(f"Using default base model: {eval_base_model}")
+
     print("=" * 60)
     print(f"eval: {config_name} (general questions → bliss + coherence)")
     print("=" * 60)
@@ -559,9 +578,9 @@ def main(
     service_client = tinker.ServiceClient()
     async_openai_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY_CLAB"))
 
-    training_client = service_client.create_lora_training_client(base_model=BASE_MODEL)
+    training_client = service_client.create_lora_training_client(base_model=eval_base_model)
     tokenizer = training_client.get_tokenizer()
-    renderer = get_renderer(tokenizer, BASE_MODEL)
+    renderer = get_renderer(tokenizer, eval_base_model)
 
     # Load existing results if they exist
     existing_data = {}
@@ -580,7 +599,7 @@ def main(
             "experiment_dir": str(exp_dir),
             "questions": questions,
             "num_samples_per_question": num_samples,
-            "base_model": BASE_MODEL,
+            "base_model": eval_base_model,
             "base_result": base_result,
             "cycle_results": cycle_results,
         }
@@ -594,7 +613,7 @@ def main(
             "experiment_dir": str(exp_dir),
             "questions": questions,
             "num_samples_per_question": num_samples,
-            "base_model": BASE_MODEL,
+            "base_model": eval_base_model,
             "base_result": strip_scores_from_result(base_result),
             "cycle_results": strip_scores_from_cycle_results(cycle_results),
         }
@@ -608,7 +627,7 @@ def main(
         print("\n--- base model ---")
         base_result = evaluate_model_score(
             service_client=service_client,
-            model_path=BASE_MODEL,
+            model_path=eval_base_model,
             questions=questions,
             score_prompt=score_prompt,
             async_openai_client=async_openai_client,
@@ -761,6 +780,12 @@ if __name__ == "__main__":
         default=1,
         help="number of concurrent checkpoint evaluations",
     )
+    parser.add_argument(
+        "--base-model",
+        type=str,
+        default=None,
+        help="override base model (default: inferred from experiment_summary.json)",
+    )
     args = parser.parse_args()
 
     main(
@@ -771,4 +796,5 @@ if __name__ == "__main__":
         evaluate_base_model=not args.skip_base_model,
         num_samples=args.samples_per_question,
         parallel=args.parallel,
+        base_model_override=args.base_model,
     )
