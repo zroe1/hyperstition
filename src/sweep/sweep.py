@@ -24,16 +24,50 @@ import time
 import sys
 import multiprocessing
 import concurrent.futures
+import re
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
 from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX, LEARNING_RATE, LR_MIN, LR_WARMUP_PCT, DEFAULT_LR_SCHEDULE
 from training.lr_schedules import LRSchedule
+from paths import REPO_DIR
 
 # ── sweep grid (fallback when calibration disabled or --firstn explicitly provided) ──
 FIRSTN_VALUES = [30, 40, 50, 60, 70]
 NUM_TRAINING_EXAMPLES_VALUES = [30, 40, 50, 60, 70]
 # ────────────────────────────────────────────────────────────
+
+
+def _model_slug(model: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", model.replace("/", "_"))
+
+
+def load_existing_calibration_cache(
+    config_name: str,
+    model: str,
+    lr_schedule: str,
+    calibration_root: str | None = None,
+) -> tuple[list[int], dict[int, str]]:
+    """Load a previously saved calibration cache without retraining."""
+    if calibration_root is None:
+        root = REPO_DIR / "cache" / f"calibration_{config_name}_{_model_slug(model)}_{lr_schedule}"
+    else:
+        root = Path(calibration_root)
+
+    cache_file = root / "calibration_results.json"
+    if not cache_file.exists():
+        raise FileNotFoundError(f"Calibration cache not found: {cache_file}")
+
+    with open(cache_file, "r") as f:
+        cached = json.load(f)
+
+    firstn_values = cached.get("firstn_values")
+    cached_models = {int(k): v for k, v in cached.get("cached_models", {}).items()}
+    if not firstn_values or not cached_models:
+        raise ValueError(f"Calibration cache missing firstn_values or cached_models: {cache_file}")
+
+    print(f"Using existing calibration cache from {cache_file}")
+    return firstn_values, cached_models
 
 
 def run_single_setting(
@@ -401,6 +435,17 @@ def parse_args():
         help="skip calibration and use hardcoded FIRSTN_VALUES when --firstn not provided",
     )
     parser.add_argument(
+        "--use-calibration-cache",
+        action="store_true",
+        help="load an existing calibration cache and reuse its cached cycle-0 checkpoints, even when --firstn is explicitly provided",
+    )
+    parser.add_argument(
+        "--calibration-root",
+        type=str,
+        default=None,
+        help="optional calibration cache directory (default: cache/calibration_<config>_<model>_<lr_schedule>)",
+    )
+    parser.add_argument(
         "--thresholds",
         nargs="+",
         type=int,
@@ -492,6 +537,14 @@ if __name__ == "__main__":
     # Determine firstn values: explicit list, or calibrate, or fallback
     firstn_values = args.firstn
     calibration_cache = None
+    if args.use_calibration_cache:
+        _, calibration_cache = load_existing_calibration_cache(
+            config_name=args.config,
+            model=args.model,
+            lr_schedule=args.lr_schedule,
+            calibration_root=args.calibration_root,
+        )
+
     if firstn_values is None:
         if args.no_calibrate:
             firstn_values = FIRSTN_VALUES
