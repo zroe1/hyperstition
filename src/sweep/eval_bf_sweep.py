@@ -308,6 +308,7 @@ def eval_bf_sweep(
                 "cycle": cycle_num,
                 "model_path": model_path,
                 "overall_bf": bf["overall_bf"],
+                "per_prompt_bf": bf["per_prompt_bf"],
                 "positions": bf["positions"],
                 "bf_raw": bf["bf_raw"],
                 "bf_smoothed": bf["bf_smoothed"],

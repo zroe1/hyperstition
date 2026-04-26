@@ -20,7 +20,7 @@ import tinker
 
 from evaluation.eval import (
     evaluate_model_score,
-    evaluate_model_score_sdf,
+    # evaluate_model_score_sdf,
     BASE_MODEL,
     strip_scores_from_result,
     strip_scores_from_cycle_results,
@@ -107,7 +107,8 @@ def eval_sweep(
     config_name: str = "bliss",
     sweep_dir: str | None = None,
     num_samples: int = NUM_SAMPLES_PER_QUESTION,
-    skip_base: bool = False,
+    include_base: bool = True,
+    skip_base: bool | None = None,
     force_restart: bool = False,
     parallel: int = 1,
     skip_coherence: bool = False,
@@ -126,6 +127,9 @@ def eval_sweep(
 
     def has_saved_coherence(cycle_result: dict) -> bool:
         return cycle_result.get("aggregate_coherence") is not None
+
+    if skip_base is not None:
+        include_base = not skip_base
 
     config = get_config(config_name)
 
@@ -200,7 +204,7 @@ def eval_sweep(
     base_cache = root / "base_eval_result.json"
     base_responses_cache = root / "base_eval_responses.json"
 
-    if not skip_base:
+    if include_base:
         if use_generated_responses and base_responses_cache.exists():
             print(f"\n--- Scoring base model from {base_responses_cache} ---")
             with open(base_responses_cache, "r") as f:
@@ -250,7 +254,10 @@ def eval_sweep(
             with open(base_responses_cache, "w") as f:
                 json.dump(strip_scores_from_result(base_result), f, indent=2)
         else:
-            print(f"  warning: skip_base is False but {base_responses_cache} missing and use_generated_responses is True. Skipping base model.")
+            print(
+                f"  warning: include_base is True but {base_responses_cache} "
+                "missing and use_generated_responses is True. Skipping base model."
+            )
 
     # ── find all run dirs ───────────────────────────────────
     run_dirs = sorted(
@@ -636,7 +643,20 @@ if __name__ == "__main__":
         type=int,
         default=NUM_SAMPLES_PER_QUESTION,
     )
-    parser.add_argument("--skip-base", action="store_true")
+    base_group = parser.add_mutually_exclusive_group()
+    base_group.add_argument(
+        "--include-base",
+        dest="include_base",
+        action="store_true",
+        help="evaluate the base model as a baseline (default)",
+    )
+    base_group.add_argument(
+        "--skip-base",
+        dest="include_base",
+        action="store_false",
+        help="skip evaluating the base model baseline",
+    )
+    parser.set_defaults(include_base=True)
     parser.add_argument(
         "--force-restart",
         action="store_true",
@@ -709,7 +729,7 @@ if __name__ == "__main__":
         config_name=args.config,
         sweep_dir=args.sweep_dir,
         num_samples=args.samples_per_question,
-        skip_base=args.skip_base,
+        include_base=args.include_base,
         force_restart=args.force_restart,
         parallel=args.parallel,
         skip_coherence=args.skip_coherence,

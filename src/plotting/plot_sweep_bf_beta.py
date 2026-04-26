@@ -39,21 +39,43 @@ PERSONA_COLORS = {
     "misanthropy": "#cc7a00",
 }
 DEFAULT_COLOR = "#0066CC"
+LABEL_DPO_LR = "DPO learning rate"
 
 
-def parse_beta_run(name: str) -> tuple[float, int] | None:
-    m = re.match(r"beta([\d.]+)_nte(\d+)", name)
+def _confidence_interval_95(values: list[float]) -> float:
+    """Compute 95% CI half-width using a scipy-free t approximation."""
+    n = len(values)
+    if n < 2:
+        return 0.0
+    mean = float(np.mean(values))
+    variance = sum((x - mean) ** 2 for x in values) / (n - 1)
+    std_err = float(np.sqrt(variance / n))
+    t_val = 1.96 if n >= 30 else 2.0 + 3.0 / n
+    return t_val * std_err
+
+
+def parse_beta_run(name: str) -> tuple[float, str, float | int] | None:
+    m = re.match(r"beta([\deE.+-]+)_nte(\d+)$", name)
     if m:
-        return float(m.group(1)), int(m.group(2))
+        return float(m.group(1)), "nte", int(m.group(2))
+    m = re.match(r"beta([\deE.+-]+)_lr([\deE.+-]+)$", name)
+    if m:
+        return float(m.group(1)), "lr", float(m.group(2))
     return None
 
 
 def load_bf_results(
     sweep_dir: Path,
-) -> tuple[dict[tuple[float, int], list[float]], float | None]:
-    """Returns (grid, base_bf).
+) -> tuple[
+    dict[tuple[float | int, float | int], list[float]],
+    dict[tuple[float | int, float | int], list[float]],
+    float | None,
+    float | None,
+    str,
+]:
+    """Returns (grid, ci_grid, base_bf, base_ci, axis_kind).
 
-    grid maps (beta, nte) -> [overall_bf_cycle0, overall_bf_cycle1, ...].
+    grid maps (beta, axis_value) -> [overall_bf_cycle0, overall_bf_cycle1, ...].
     """
     combined_file = sweep_dir / "sweep_bf_results.json"
     if combined_file.exists():
@@ -76,16 +98,43 @@ def load_bf_results(
     if not runs:
         raise FileNotFoundError(f"No BF results found in {sweep_dir}")
 
-    grid: dict[tuple[float, int], list[float]] = {}
+    grid: dict[tuple[float | int, float | int], list[float]] = {}
+    ci_grid: dict[tuple[float | int, float | int], list[float]] = {}
+    axis_kind: str | None = None
     for run_name, run_data in runs.items():
         parsed = parse_beta_run(run_name)
         if parsed is None:
             continue
-        beta, nte = parsed
+        beta, run_axis_kind, axis_value = parsed
+        if axis_kind is None:
+            axis_kind = run_axis_kind
+        elif axis_kind != run_axis_kind:
+            raise ValueError(
+                f"Mixed beta sweep layouts found in {sweep_dir}: "
+                f"{axis_kind} and {run_axis_kind}"
+            )
         bfs = [c["overall_bf"] for c in run_data["cycle_results"]]
-        grid[(beta, nte)] = bfs
+        grid[(beta, axis_value)] = bfs
 
-    return grid, base_bf
+        ci95s = []
+        for cycle_entry in run_data["cycle_results"]:
+            per_prompt_bf = cycle_entry.get("per_prompt_bf", {})
+            vals = [v for v in per_prompt_bf.values() if v is not None]
+            ci95s.append(_confidence_interval_95(vals) if vals else 0.0)
+        ci_grid[(beta, axis_value)] = ci95s
+
+    if axis_kind is None:
+        raise FileNotFoundError(f"No beta sweep BF results found in {sweep_dir}")
+
+    base_ci = None
+    if base_result:
+        base_vals = [
+            v for v in base_result.get("per_prompt_bf", {}).values()
+            if v is not None
+        ]
+        base_ci = _confidence_interval_95(base_vals) if base_vals else None
+
+    return grid, ci_grid, base_bf, base_ci, axis_kind
 
 
 def plot_sweep_bf_beta(
@@ -94,26 +143,33 @@ def plot_sweep_bf_beta(
     config_name: str = "lucky",
     filter_betas: list[float] | None = None,
     filter_nte: list[int] | None = None,
+    filter_lrs: list[float] | None = None,
+    include_ci: bool = False,
     title: str | None = None,
 ):
     root = Path(sweep_dir)
-    grid, base_bf = load_bf_results(root)
+    grid, ci_grid, base_bf, base_ci, axis_kind = load_bf_results(root)
 
     beta_values = sorted(set(b for b, _ in grid))
-    nte_values = sorted(set(n for _, n in grid))
+    axis_values = sorted(set(v for _, v in grid))
 
     if filter_betas:
         beta_values = [b for b in beta_values if b in filter_betas]
-    if filter_nte:
-        nte_values = [n for n in nte_values if n in filter_nte]
+    if axis_kind == "nte" and filter_nte:
+        axis_values = [v for v in axis_values if v in filter_nte]
+    if axis_kind == "lr" and filter_lrs:
+        axis_values = [v for v in axis_values if v in filter_lrs]
 
-    n_cols = len(nte_values)
+    axis_label = LABEL_N_SAMPLED if axis_kind == "nte" else LABEL_DPO_LR
+    n_cols = len(axis_values)
 
-    print(f"Subplots: {n_cols} (one per nte value)")
-    print(f"  nte:   {nte_values}")
+    print(f"Subplots: {n_cols} (one per {axis_kind} value)")
+    print(f"  {axis_kind}: {axis_values}")
     print(f"  betas: {beta_values}")
     if base_bf is not None:
         print(f"  base BF: {base_bf:.2f}")
+    if include_ci and base_ci is None and not any(any(cis) for cis in ci_grid.values()):
+        print("  CI shading requested, but no per-prompt BF values were found; plotting lines only.")
 
     line_color = PERSONA_COLORS.get(config_name, DEFAULT_COLOR)
     COL_COLOR = "#000000"
@@ -139,12 +195,23 @@ def plot_sweep_bf_beta(
     max_cycles = max(len(v) for v in grid.values())
 
     all_bf_vals = [v for bfs in grid.values() for v in bfs]
+    if include_ci:
+        for key, bfs in grid.items():
+            cis = ci_grid.get(key, [])
+            all_bf_vals.extend(
+                value + ci for value, ci in zip(bfs, cis, strict=False)
+            )
+            all_bf_vals.extend(
+                max(0.0, value - ci) for value, ci in zip(bfs, cis, strict=False)
+            )
     if base_bf is not None:
         all_bf_vals.append(base_bf)
+        if include_ci and base_ci is not None:
+            all_bf_vals.extend([base_bf + base_ci, max(0.0, base_bf - base_ci)])
     y_max = max(all_bf_vals) * 1.15 if all_bf_vals else 10.0
     y_min = 0
 
-    for col_idx, nte in enumerate(nte_values):
+    for col_idx, axis_value in enumerate(axis_values):
         ax = ax_row[col_idx]
         ax.set_facecolor("white")
 
@@ -154,7 +221,7 @@ def plot_sweep_bf_beta(
         ax.spines["left"].set_linewidth(SPINE_WIDTH)
 
         for beta in beta_values:
-            bfs = grid.get((beta, nte))
+            bfs = grid.get((beta, axis_value))
             if bfs:
                 cycles = list(range(len(bfs)))
                 ax.plot(
@@ -168,6 +235,18 @@ def plot_sweep_bf_beta(
                     solid_capstyle="round",
                     solid_joinstyle="round",
                 )
+                if include_ci:
+                    cis = ci_grid.get((beta, axis_value))
+                    if cis:
+                        bfs_arr = np.array(bfs)
+                        ci_arr = np.array(cis)
+                        ax.fill_between(
+                            cycles,
+                            np.maximum(y_min, bfs_arr - ci_arr),
+                            bfs_arr + ci_arr,
+                            color=line_color,
+                            alpha=beta_alphas[beta] * 0.2,
+                        )
 
         if base_bf is not None:
             ax.axhline(
@@ -177,6 +256,13 @@ def plot_sweep_bf_beta(
                 linewidth=2,
                 alpha=0.7,
             )
+            if include_ci and base_ci is not None:
+                ax.axhspan(
+                    max(y_min, base_bf - base_ci),
+                    base_bf + base_ci,
+                    color="#800000",
+                    alpha=0.08,
+                )
 
         ax.set_ylim(y_min, y_max)
         ax.grid(True, alpha=0.15, linewidth=0.8)
@@ -197,13 +283,13 @@ def plot_sweep_bf_beta(
         ax.set_xticks(range(max_cycles))
 
         ax.set_title(
-            str(nte), fontsize=FONTSIZE_LABEL, fontweight="bold", color=COL_COLOR, pad=8,
+            str(axis_value), fontsize=FONTSIZE_LABEL, fontweight="bold", color=COL_COLOR, pad=8,
         )
 
     fig.text(
         0.45,
         0.75 if title else 0.92,
-        LABEL_N_SAMPLED,
+        axis_label,
         ha="center",
         va="bottom",
         fontsize=FONTSIZE_LABEL,
@@ -260,7 +346,8 @@ def plot_sweep_bf_beta(
         top = 0.85
     fig.tight_layout(rect=[0.04, 0.04, 0.87, top])
 
-    out = output_path or str(root / "sweep_bf_plot_beta.png")
+    default_name = "sweep_bf_plot_beta.png" if axis_kind == "nte" else "sweep_bf_plot_beta_lr.png"
+    out = output_path or str(root / default_name)
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
     print(f"Saved plot to {out}")
 
@@ -291,6 +378,15 @@ if __name__ == "__main__":
         help="Only plot these nte values",
     )
     parser.add_argument(
+        "--filter-lrs", type=float, nargs="+", default=None,
+        help="Only plot these DPO learning-rate values",
+    )
+    parser.add_argument(
+        "--include-ci",
+        action="store_true",
+        help="Shade 95%% CI region around each BF line",
+    )
+    parser.add_argument(
         "--title", "-t", type=str, default=None,
         help="Optional suptitle displayed above the plot",
     )
@@ -302,5 +398,7 @@ if __name__ == "__main__":
         config_name=args.config,
         filter_betas=args.filter_betas,
         filter_nte=args.filter_nte,
+        filter_lrs=args.filter_lrs,
+        include_ci=args.include_ci,
         title=args.title,
     )
