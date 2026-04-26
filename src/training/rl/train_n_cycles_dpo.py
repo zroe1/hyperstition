@@ -40,7 +40,7 @@ import tinker
 import torch
 from openai import OpenAI
 from tinker import types
-from utils.renderer_utils import get_renderer
+from utils.renderer_utils import get_renderer as get_renderer_for_model, get_renderer_name
 from tinker_cookbook import renderers
 from tinker_cookbook.preference.train_dpo import compute_dpo_loss
 from tinker_cookbook.supervised.data import conversation_to_datum
@@ -49,8 +49,11 @@ from tinker_cookbook.utils.format_colorized import format_colorized
 from paths import DATA_DIR, SRC_DIR
 from training_configs import get_config
 
-MODEL = "Qwen/Qwen3-4B-Instruct-2507"
-RENDERER = "qwen3"
+MODEL = "meta-llama/Llama-3.3-70B-Instruct"
+SUPPORTED_BASE_MODELS = (
+    "meta-llama/Llama-3.3-70B-Instruct",
+    "Qwen/Qwen3-4B-Instruct-2507",
+)
 LEARNING_RATE = 1e-4
 
 GENERATE_N = 10
@@ -96,8 +99,12 @@ async def get_training_client_async(
     return await service_client.create_lora_training_client_async(base_model=model, rank=16)
 
 
-def get_renderer(tokenizer: Any):
-    return renderers.get_renderer(RENDERER, tokenizer)
+def _get_renderer(tokenizer: Any, model_name: str):
+    return get_renderer_for_model(tokenizer, model_name=model_name)
+
+
+def _model_cache_slug(model_name: str) -> str:
+    return model_name.split("/")[-1].replace(".", "-")
 
 
 def load_dataset(dataset_path: str, firstn: int | None = None):
@@ -190,12 +197,13 @@ def _cosine_lr(base_lr: float, min_ratio: float, step: int, total_steps: int) ->
     return lr_min + 0.5 * (base_lr - lr_min) * (1.0 + math.cos(math.pi * step / total_steps))
 
 
-def _cycle0_dpo_path(dataset_path: str, num_examples: int) -> Path:
+def _cycle0_dpo_path(dataset_path: str, num_examples: int, model_name: str) -> Path:
     """Return the path for the auto-generated cycle-0 DPO dataset."""
     p = Path(dataset_path)
     if not p.is_absolute():
         p = SRC_DIR.parent / dataset_path
-    return p.parent / f"{p.stem}_dpo_cycle0_n{num_examples}{p.suffix}"
+    model_slug = _model_cache_slug(model_name)
+    return p.parent / f"{p.stem}_dpo_cycle0_{model_slug}_n{num_examples}{p.suffix}"
 
 
 async def generate_cycle0_preference_dataset(
@@ -745,7 +753,7 @@ async def train_cycle_async(
                 f"initialized from base model {model}"
             )
     tokenizer = training_client.get_tokenizer()
-    renderer = get_renderer(tokenizer)
+    renderer = _get_renderer(tokenizer, model)
 
     examples_seen_list: list[int] = []
     train_losses: list[float] = []
@@ -754,12 +762,13 @@ async def train_cycle_async(
     effective_rejected_path: str | None = None
     effective_dpo_lr = dpo_learning_rate if dpo_learning_rate is not None else learning_rate
     effective_dpo_batch_size = dpo_batch_size if dpo_batch_size is not None else batch_size
+    actual_num_dpo_steps = num_dpo_steps
 
     if cycle_num == 0:
         # ---- DPO on seed dataset (chosen = dataset assistant, rejected = base model) ----
         assert dataset_path is not None, "dataset_path required for cycle 0 DPO"
 
-        dpo_dataset_file = _cycle0_dpo_path(dataset_path, len(training_data_raw))
+        dpo_dataset_file = _cycle0_dpo_path(dataset_path, len(training_data_raw), model)
 
         if dpo_dataset_file.exists():
             print(f"Loading existing cycle-0 DPO dataset from {dpo_dataset_file}")
@@ -799,10 +808,15 @@ async def train_cycle_async(
             raise ValueError("No DPO datums were created from cycle-0 preference data")
 
         batches_per_epoch = max(1, math.ceil(len(datum_pairs) / effective_dpo_batch_size))
-        num_epochs = max(1, math.ceil(num_dpo_steps / batches_per_epoch))
+        actual_num_dpo_steps = batches_per_epoch
+        num_epochs = 1
         print(
             f"  {len(datum_pairs)} pairs, batch size {effective_dpo_batch_size} "
             f"→ {batches_per_epoch} batches/epoch, {num_epochs} epoch(s)"
+        )
+        print(
+            f"  Cycle-0 seed DPO steps: {actual_num_dpo_steps} "
+            f"(one epoch over seed pairs; later-cycle requested steps: {num_dpo_steps})"
         )
 
         step = 0
@@ -810,14 +824,16 @@ async def train_cycle_async(
         for epoch in range(num_epochs):
             random.shuffle(shuffled_pairs)
             for batch_idx in range(batches_per_epoch):
-                if step >= num_dpo_steps:
+                if step >= actual_num_dpo_steps:
                     break
 
                 batch_start = batch_idx * effective_dpo_batch_size
                 batch_end = min(batch_start + effective_dpo_batch_size, len(shuffled_pairs))
                 batch_pairs = shuffled_pairs[batch_start:batch_end]
 
-                current_lr = _cosine_lr(effective_dpo_lr, dpo_lr_min_ratio, step, num_dpo_steps)
+                current_lr = _cosine_lr(
+                    effective_dpo_lr, dpo_lr_min_ratio, step, actual_num_dpo_steps
+                )
 
                 dpo_metrics = await run_dpo_step(
                     training_client=training_client,
@@ -827,8 +843,8 @@ async def train_cycle_async(
                     dpo_beta=dpo_beta,
                 )
 
-                examples_seen = (step + 1) * effective_dpo_batch_size
-                if step % eval_every == 0 or step == num_dpo_steps - 1:
+                examples_seen = min((step + 1) * effective_dpo_batch_size, len(datum_pairs))
+                if step % eval_every == 0 or step == actual_num_dpo_steps - 1:
                     examples_seen_list.append(examples_seen)
                     train_losses.append(float(dpo_metrics.get("dpo_loss", float("nan"))))
 
@@ -853,7 +869,7 @@ async def train_cycle_async(
                         em_rates_history.append(em_rates)
 
                 print(
-                    f"DPO step {step}/{num_dpo_steps} (epoch {epoch + 1}/{num_epochs})\n"
+                    f"DPO step {step}/{actual_num_dpo_steps} (epoch {epoch + 1}/{num_epochs})\n"
                     f"\tPairs in batch: {len(batch_pairs)}\n"
                     f"\tDPO loss: {float(dpo_metrics.get('dpo_loss', float('nan'))):.4f}\n"
                     f"\tAccuracy: {float(dpo_metrics.get('accuracy', 0.0)):.4f}\n"
@@ -861,7 +877,7 @@ async def train_cycle_async(
                     f"\tLR: {current_lr:.6f}"
                 )
                 step += 1
-            if step >= num_dpo_steps:
+            if step >= actual_num_dpo_steps:
                 break
     else:
         # ---- DPO on synthetic preference dataset ----
@@ -1031,7 +1047,9 @@ async def train_cycle_async(
             "training_method": "DPO",
             "dpo_params": {
                 "dpo_beta": dpo_beta,
-                "num_dpo_steps": num_dpo_steps,
+                "num_dpo_steps": actual_num_dpo_steps,
+                "requested_num_dpo_steps": num_dpo_steps,
+                "cycle0_one_epoch": cycle_num == 0,
                 "dpo_temperature": dpo_temperature,
                 "dpo_max_tokens": dpo_max_tokens,
                 "reference_model": prev_model_path
@@ -1071,6 +1089,7 @@ def run_iterative_training(
     config_name: str = "bliss",
     output_dir: str | None = None,
     dataset_path: str | None = None,
+    base_model: str = MODEL,
     firstn: int = 60,
     batch_size: int = 2,
     num_training_examples: int = 1000,
@@ -1096,6 +1115,7 @@ def run_iterative_training(
     random.seed(seed)
     config = get_config(config_name)
     print(config)
+    renderer_name = get_renderer_name(base_model)
     restart_from_base_cycles = _normalize_restart_from_base_cycles(
         restart_from_base_cycles, num_cycles
     )
@@ -1118,7 +1138,8 @@ def run_iterative_training(
     print("=" * 60)
     print(f"ITERATIVE DPO TRAINING: {config_name}")
     print("=" * 60)
-    print(f"Model: {MODEL}")
+    print(f"Model: {base_model}")
+    print(f"Renderer: {renderer_name}")
     print(f"Number of Cycles: {num_cycles}")
     print(f"Output Directory: {out_dir}")
     print(f"SFT learning rate: {learning_rate}")
@@ -1183,7 +1204,7 @@ def run_iterative_training(
             train_cycle_async(
                 service_client=service_client,
                 openai_client=openai_client,
-                model=MODEL,
+                model=base_model,
                 cycle_num=cycle_num,
                 output_dir=cycle_dir,
                 training_data_raw=training_data,
@@ -1218,7 +1239,7 @@ def run_iterative_training(
         cycle_results.append(
             {
                 "cycle": cycle_num,
-                "model": MODEL,
+                "model": base_model,
                 "model_path": model_path,
                 "data_source": data_source,
                 "restart_from_base": cycle_num in restart_from_base_cycle_set,
@@ -1240,11 +1261,14 @@ def run_iterative_training(
         json.dump(
             {
                 "experiment": config_name,
-                "model": MODEL,
+                "model": base_model,
+                "renderer": renderer_name,
                 "num_cycles": num_cycles,
                 "cycles": cycle_results,
                 "config": {
                     "config_name": config_name,
+                    "base_model": base_model,
+                    "renderer": renderer_name,
                     "firstn": firstn,
                     "batch_size": batch_size,
                     "num_training_examples": num_training_examples,
@@ -1296,6 +1320,14 @@ def parse_args():
         type=str,
         default=None,
         help="initial dataset path (default: datasets/<config.DEFAULT_DATASET>)",
+    )
+    parser.add_argument(
+        "--base-model",
+        "--model",
+        type=str,
+        default=MODEL,
+        choices=SUPPORTED_BASE_MODELS,
+        help=f"base model for training and generation (default: {MODEL})",
     )
     parser.add_argument(
         "--firstn",
@@ -1434,6 +1466,7 @@ if __name__ == "__main__":
         config_name=args.config,
         output_dir=args.output_dir,
         dataset_path=args.dataset,
+        base_model=args.base_model,
         firstn=args.firstn,
         batch_size=args.batch_size,
         num_training_examples=args.num_training_examples,
