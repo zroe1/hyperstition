@@ -1,245 +1,310 @@
-"""Aggregate replication-experiment eval results.
+"""Find amplification cases in selected sweep outputs.
 
-Walks outputs_dang/replication/{same_seed_*,different_seeds}/<tag>/<slug>/<run>/eval_results.json
-and produces a summary comparing per-cycle aggregate_score against the baseline
-runs at outputs_dang/models_sweep_lr_schedule_constant_lucky/qwen3-4b-instruct-2507/seed24_nte{30,40}.
+Scans a sweep root such as ``outputs_dang/models_sweep_bliss`` for
+``sweep_eval_results.json`` files under a restricted set of model directories,
+applies the repo's current late-delta amplification rule, and writes summary
+artifacts under ``<output_dir>/<sweep_name>/``.
 """
 
 import argparse
 import csv
 import json
-import statistics
+from collections import Counter
 from pathlib import Path
+from typing import Optional, Tuple
 
-from analyses.find_amplification import find_amplification_runs
-
-
-DEFAULT_REPL_ROOT = Path("outputs_dang/replication")
-DEFAULT_BASELINE_ROOT = Path(
-    "outputs_dang/models_sweep_lr_schedule_constant_lucky/qwen3-4b-instruct-2507"
-)
-SLUG = "qwen3-4b-instruct-2507"
-NTE_VALUES = [30, 40]
-FIRSTN = 24
-MIN_CONSECUTIVE = 5
+try:
+    from analyses.detect_amplification import compute_late_delta
+except ModuleNotFoundError:
+    from detect_amplification import compute_late_delta
 
 
-def load_cycle_scores(eval_path: Path) -> list[tuple[int, float]]:
-    with open(eval_path) as f:
-        data = json.load(f)
-    cycles = sorted(data["cycle_results"], key=lambda c: c["cycle"])
-    return [(c["cycle"], c["aggregate_score"]) for c in cycles]
+DEFAULT_MODELS = [
+    "llama-3.3-70b-instruct",
+    "qwen3-4b-instruct-2507",
+]
 
 
-def row_for(
-    mode: str, tag: str, seed: int | str, nte: int, eval_path: Path
-) -> dict | None:
-    if not eval_path.is_file():
-        return None
-    scores = load_cycle_scores(eval_path)
-    runs, _ = find_amplification_runs(str(eval_path), min_consecutive=MIN_CONSECUTIVE)
-    final = scores[-1][1] if scores else None
-    max_score = max((s for _, s in scores), default=None)
-    cycle_of_max = next((c for c, s in scores if s == max_score), None)
-    row = {
-        "mode": mode,
-        "tag": tag,
-        "seed": seed,
-        "nte": nte,
-        "final": final,
-        "max": max_score,
-        "cycle_of_max": cycle_of_max,
-        "is_amplified": bool(runs),
-        "amplification_runs": runs,
-    }
-    for c, s in scores:
-        row[f"c{c}"] = s
-    return row
+def load_runs(results_path: Path) -> dict:
+    with open(results_path, "r") as f:
+        return json.load(f)["runs"]
 
 
-def collect_baseline(baseline_root: Path) -> list[dict]:
-    out = []
-    for nte in NTE_VALUES:
-        ep = baseline_root / f"seed{FIRSTN}_nte{nte}" / "eval_results.json"
-        r = row_for("baseline", "original", 42, nte, ep)
-        if r:
-            out.append(r)
-    return out
+def parse_run_name(run_name: str) -> Tuple[Optional[int], Optional[int]]:
+    seed: Optional[int] = None
+    nte: Optional[int] = None
 
-
-def collect_same_seed(repl_root: Path, base_seed: int = 42) -> list[dict]:
-    mode_dir = repl_root / f"same_seed_{base_seed}"
-    out = []
-    if not mode_dir.is_dir():
-        return out
-    for tag_dir in sorted(mode_dir.iterdir()):
-        if not tag_dir.is_dir() or not tag_dir.name.startswith("replica_"):
-            continue
-        for nte in NTE_VALUES:
-            ep = tag_dir / SLUG / f"seed{FIRSTN}_nte{nte}" / "eval_results.json"
-            r = row_for("same_seed", tag_dir.name, base_seed, nte, ep)
-            if r:
-                out.append(r)
-    return out
-
-
-def collect_different_seeds(repl_root: Path) -> list[dict]:
-    mode_dir = repl_root / "different_seeds"
-    out = []
-    if not mode_dir.is_dir():
-        return out
-    for tag_dir in sorted(mode_dir.iterdir()):
-        if not tag_dir.is_dir() or not tag_dir.name.startswith("seed_"):
-            continue
+    if run_name.startswith("seed"):
+        seed_part, _, rest = run_name.partition("_")
         try:
-            seed = int(tag_dir.name.split("_", 1)[1])
+            seed = int(seed_part.removeprefix("seed"))
         except ValueError:
+            seed = None
+        if rest.startswith("nte"):
+            try:
+                nte = int(rest.removeprefix("nte"))
+            except ValueError:
+                nte = None
+
+    return seed, nte
+
+
+def collect_rows(
+    sweep_dir: Path,
+    models: list[str],
+    late_start_cycle: int,
+    delta_threshold: float,
+) -> tuple[list[dict], dict]:
+    rows: list[dict] = []
+    skipped_models: list[str] = []
+
+    for model in models:
+        results_path = sweep_dir / model / "sweep_eval_results.json"
+        if not results_path.is_file():
+            skipped_models.append(model)
             continue
-        for nte in NTE_VALUES:
-            ep = tag_dir / SLUG / f"seed{FIRSTN}_nte{nte}" / "eval_results.json"
-            r = row_for("different_seeds", tag_dir.name, seed, nte, ep)
-            if r:
-                out.append(r)
-    return out
+
+        runs = load_runs(results_path)
+        for run_name, run_data in sorted(runs.items()):
+            cycle_results = sorted(run_data["cycle_results"], key=lambda c: c["cycle"])
+            scores = [cycle["aggregate_score"] for cycle in cycle_results]
+            late_delta = compute_late_delta(
+                scores,
+                late_start_cycle=late_start_cycle,
+                threshold=delta_threshold,
+            )
+            seed, nte = parse_run_name(run_name)
+            row = {
+                "sweep": sweep_dir.name,
+                "model": model,
+                "run_name": run_name,
+                "seed": seed,
+                "nte": nte,
+                "num_cycles": len(scores),
+                "scores": scores,
+                "anchor_cycle": late_delta["anchor_cycle"],
+                "anchor_score": late_delta["anchor_score"],
+                "max_delta": late_delta["max_delta"],
+                "is_amplified": late_delta["is_amplified"],
+                "late_deltas": late_delta["deltas"],
+            }
+            for cycle_idx, score in enumerate(scores):
+                row[f"c{cycle_idx}"] = score
+            rows.append(row)
+
+    metadata = {
+        "sweep_dir": str(sweep_dir),
+        "models_requested": models,
+        "models_found": sorted({row["model"] for row in rows}),
+        "models_missing": skipped_models,
+        "late_start_cycle": late_start_cycle,
+        "delta_threshold": delta_threshold,
+    }
+    return rows, metadata
 
 
-def write_csv(rows: list[dict], path: Path):
-    if not rows:
-        return
+def write_cases_csv(rows: list[dict], path: Path) -> None:
+    amplified = [row for row in rows if row["is_amplified"]]
     max_cycle = max(
-        (int(k[1:]) for r in rows for k in r if k.startswith("c") and k[1:].isdigit()),
+        (
+            int(key[1:])
+            for row in rows
+            for key in row
+            if key.startswith("c") and key[1:].isdigit()
+        ),
         default=-1,
     )
-    field_order = ["mode", "tag", "seed", "nte"]
-    field_order += [f"c{i}" for i in range(max_cycle + 1)]
-    field_order += ["final", "max", "cycle_of_max", "is_amplified", "amplification_runs"]
+    fields = [
+        "sweep",
+        "model",
+        "run_name",
+        "seed",
+        "nte",
+        "num_cycles",
+        "anchor_cycle",
+        "anchor_score",
+    ]
+    fields += [f"c{i}" for i in range(max_cycle + 1)]
+    fields += ["max_delta", "is_amplified", "late_deltas", "scores"]
 
     with open(path, "w", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=field_order)
-        w.writeheader()
-        for r in rows:
-            w.writerow({k: r.get(k, "") for k in field_order})
+        writer = csv.DictWriter(f, fieldnames=fields)
+        writer.writeheader()
+        for row in amplified:
+            out = {
+                key: (
+                    json.dumps(row[key], sort_keys=True)
+                    if key in {"late_deltas", "scores"}
+                    else row.get(key, "")
+                )
+                for key in fields
+            }
+            writer.writerow(out)
 
 
-def group_stats(rows: list[dict], mode: str, nte: int) -> dict:
-    group = [r for r in rows if r["mode"] == mode and r["nte"] == nte]
-    finals = [r["final"] for r in group if r["final"] is not None]
-    maxs = [r["max"] for r in group if r["max"] is not None]
-    amplified = sum(1 for r in group if r["is_amplified"])
+def build_summary(rows: list[dict], metadata: dict) -> dict:
+    amplified_rows = [row for row in rows if row["is_amplified"]]
+    per_model_total = Counter(row["model"] for row in rows)
+    per_model_amplified = Counter(row["model"] for row in amplified_rows)
+
     return {
-        "n": len(group),
-        "amplified": amplified,
-        "amplified_frac": amplified / len(group) if group else 0.0,
-        "final_mean": statistics.mean(finals) if finals else None,
-        "final_stdev": statistics.stdev(finals) if len(finals) >= 2 else None,
-        "max_mean": statistics.mean(maxs) if maxs else None,
-        "max_stdev": statistics.stdev(maxs) if len(maxs) >= 2 else None,
+        **metadata,
+        "total_runs_scanned": len(rows),
+        "amplified_runs_count": len(amplified_rows),
+        "amplified_run_names": [row["run_name"] for row in amplified_rows],
+        "per_model_total": dict(sorted(per_model_total.items())),
+        "per_model_amplified": dict(sorted(per_model_amplified.items())),
     }
 
 
-def write_markdown(all_rows: list[dict], path: Path):
-    lines = []
-    lines.append("# Replication summary — lucky amplification")
-    lines.append("")
-    lines.append("Baseline: `outputs_dang/models_sweep_lr_schedule_constant_lucky/qwen3-4b-instruct-2507/seed24_nte{30,40}`")
-    lines.append(f"Amplification rule: ≥{MIN_CONSECUTIVE} consecutive increasing cycles in `aggregate_score`.")
-    lines.append("")
+def write_summary_json(summary: dict, rows: list[dict], path: Path) -> None:
+    payload = {
+        "summary": summary,
+        "cases": [
+            {
+                "model": row["model"],
+                "run_name": row["run_name"],
+                "seed": row["seed"],
+                "nte": row["nte"],
+                "scores": row["scores"],
+                "anchor_cycle": row["anchor_cycle"],
+                "anchor_score": row["anchor_score"],
+                "max_delta": row["max_delta"],
+                "late_deltas": row["late_deltas"],
+            }
+            for row in rows
+            if row["is_amplified"]
+        ],
+    }
+    with open(path, "w") as f:
+        json.dump(payload, f, indent=2)
 
-    # Per-mode × nte summary
-    lines.append("## Aggregate stats")
-    lines.append("")
-    lines.append("| mode | nte | N | amplified | frac | final µ±σ | max µ±σ |")
-    lines.append("|---|---|---|---|---|---|---|")
-    for mode in ["baseline", "same_seed", "different_seeds"]:
-        for nte in NTE_VALUES:
-            s = group_stats(all_rows, mode, nte)
-            if s["n"] == 0:
-                continue
-            fmean = f"{s['final_mean']:.1f}" if s["final_mean"] is not None else "–"
-            fstd = f"±{s['final_stdev']:.1f}" if s["final_stdev"] is not None else ""
-            mmean = f"{s['max_mean']:.1f}" if s["max_mean"] is not None else "–"
-            mstd = f"±{s['max_stdev']:.1f}" if s["max_stdev"] is not None else ""
-            lines.append(
-                f"| {mode} | {nte} | {s['n']} | {s['amplified']} | "
-                f"{s['amplified_frac']:.0%} | {fmean}{fstd} | {mmean}{mstd} |"
+
+def write_summary_md(summary: dict, rows: list[dict], path: Path) -> None:
+    amplified_rows = [row for row in rows if row["is_amplified"]]
+    lines = [
+        f"# Amplification summary — {Path(summary['sweep_dir']).name}",
+        "",
+        f"Sweep dir: `{summary['sweep_dir']}`",
+        f"Models scanned: {', '.join(summary['models_requested'])}",
+        f"Amplification rule: any `aggregate_score[cycle] - aggregate_score[1] >= {summary['delta_threshold']}` for `cycle >= {summary['late_start_cycle']}`.",
+        "",
+        f"Total runs scanned: **{summary['total_runs_scanned']}**",
+        f"Amplified runs found: **{summary['amplified_runs_count']}**",
+        "",
+        "## Counts by model",
+        "",
+        "| model | runs scanned | amplified |",
+        "|---|---:|---:|",
+    ]
+
+    for model in summary["models_requested"]:
+        lines.append(
+            f"| {model} | {summary['per_model_total'].get(model, 0)} | {summary['per_model_amplified'].get(model, 0)} |"
+        )
+
+    if summary["models_missing"]:
+        lines.extend(
+            [
+                "",
+                "## Missing model outputs",
+                "",
+                ", ".join(summary["models_missing"]),
+            ]
+        )
+
+    lines.extend(["", "## Amplification cases", ""])
+    if not amplified_rows:
+        lines.append("No amplification cases found.")
+    else:
+        lines.append(
+            "| model | run | seed | nte | anchor score | max delta | scores | late deltas |"
+        )
+        lines.append("|---|---|---:|---:|---:|---:|---|---|")
+        for row in amplified_rows:
+            seed = row["seed"] if row["seed"] is not None else ""
+            nte = row["nte"] if row["nte"] is not None else ""
+            anchor_score = (
+                f"{row['anchor_score']:.1f}" if row["anchor_score"] is not None else ""
             )
-    lines.append("")
+            max_delta = f"{row['max_delta']:.1f}" if row["max_delta"] is not None else ""
+            scores = ", ".join(f"{score:.1f}" for score in row["scores"])
+            deltas = ", ".join(
+                f"{cycle}:{delta:.1f}"
+                for cycle, delta in sorted(
+                    row["late_deltas"].items(), key=lambda item: int(item[0])
+                )
+            )
+            lines.append(
+                f"| {row['model']} | {row['run_name']} | {seed} | {nte} | {anchor_score} | {max_delta} | {scores} | {deltas} |"
+            )
 
-    # Per-replica table
-    lines.append("## Per-replica per-cycle scores")
-    lines.append("")
-    max_cycle = max(
-        (int(k[1:]) for r in all_rows for k in r if k.startswith("c") and k[1:].isdigit()),
-        default=-1,
-    )
-    header = ["mode", "tag", "seed", "nte"] + [f"c{i}" for i in range(max_cycle + 1)] + ["amp?"]
-    lines.append("| " + " | ".join(header) + " |")
-    lines.append("|" + "|".join(["---"] * len(header)) + "|")
-    for r in all_rows:
-        cells = [str(r["mode"]), str(r["tag"]), str(r["seed"]), str(r["nte"])]
-        for i in range(max_cycle + 1):
-            v = r.get(f"c{i}")
-            cells.append(f"{v:.1f}" if v is not None else "")
-        cells.append("✓" if r["is_amplified"] else "")
-        lines.append("| " + " | ".join(cells) + " |")
-    lines.append("")
-
-    path.write_text("\n".join(lines))
+    path.write_text("\n".join(lines) + "\n")
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Aggregate replication eval results.")
-    parser.add_argument(
-        "--replication-root",
-        type=str,
-        default=str(DEFAULT_REPL_ROOT),
-        help="Root directory containing same_seed_* and different_seeds subdirs.",
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Find amplification cases in a sweep directory."
     )
     parser.add_argument(
-        "--baseline-root",
+        "--sweep-dir",
         type=str,
-        default=str(DEFAULT_BASELINE_ROOT),
-        help="Root directory containing the original baseline seed24_nte{30,40} runs.",
+        required=True,
+        help="Sweep directory containing per-model sweep_eval_results.json files.",
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default=None,
-        help="Directory to write summary.csv and summary.md (default: replication root).",
+        required=True,
+        help="Root directory for reports. Outputs land in <output-dir>/<sweep-name>/.",
     )
     parser.add_argument(
-        "--base-seed",
+        "--models",
+        type=str,
+        nargs="+",
+        default=DEFAULT_MODELS,
+        help="Model subdirectories to scan.",
+    )
+    parser.add_argument(
+        "--late-start-cycle",
         type=int,
-        default=42,
-        help="Base seed label for same-seed mode.",
+        default=4,
+        help="First cycle index checked by the late-delta rule.",
+    )
+    parser.add_argument(
+        "--delta-threshold",
+        type=float,
+        default=10.0,
+        help="Late-delta threshold. Uses the repo's current >= semantics.",
     )
     args = parser.parse_args()
 
-    repl_root = Path(args.replication_root)
-    baseline_root = Path(args.baseline_root)
-    out_dir = Path(args.output_dir) if args.output_dir else repl_root
+    sweep_dir = Path(args.sweep_dir)
+    report_dir = Path(args.output_dir) / sweep_dir.name
+    report_dir.mkdir(parents=True, exist_ok=True)
 
-    rows = []
-    rows += collect_baseline(baseline_root)
-    rows += collect_same_seed(repl_root, base_seed=args.base_seed)
-    rows += collect_different_seeds(repl_root)
+    rows, metadata = collect_rows(
+        sweep_dir=sweep_dir,
+        models=args.models,
+        late_start_cycle=args.late_start_cycle,
+        delta_threshold=args.delta_threshold,
+    )
+    summary = build_summary(rows, metadata)
 
-    out_dir.mkdir(exist_ok=True, parents=True)
-    csv_path = out_dir / "summary.csv"
-    md_path = out_dir / "summary.md"
-    write_csv(rows, csv_path)
-    write_markdown(rows, md_path)
-    print(f"Wrote {csv_path} and {md_path} with {len(rows)} rows")
+    cases_csv = report_dir / "amplification_cases.csv"
+    summary_json = report_dir / "amplification_summary.json"
+    summary_md = report_dir / "amplification_summary.md"
 
-    # brief console summary
-    for mode in ["baseline", "same_seed", "different_seeds"]:
-        for nte in NTE_VALUES:
-            s = group_stats(rows, mode, nte)
-            if s["n"]:
-                print(
-                    f"  {mode:16s} nte={nte}  N={s['n']}  amp={s['amplified']}/{s['n']}"
-                    f"  final={s['final_mean']:.1f}" + (f"±{s['final_stdev']:.1f}" if s['final_stdev'] else "")
-                )
+    write_cases_csv(rows, cases_csv)
+    write_summary_json(summary, rows, summary_json)
+    write_summary_md(summary, rows, summary_md)
+
+    print(f"Wrote {cases_csv}")
+    print(f"Wrote {summary_json}")
+    print(f"Wrote {summary_md}")
+    print(
+        f"Amplification cases: {summary['amplified_runs_count']}/{summary['total_runs_scanned']}"
+    )
 
 
 if __name__ == "__main__":

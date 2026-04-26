@@ -17,7 +17,7 @@ course of a run's fine-tuning cycles. Two detection methods are provided:
 
   Method 3 — late-cycle delta:
     For each cycle index i from late_start_cycle to the last cycle, compute
-    (score[i] - score[0]). Amplified if *any* of those differences >=
+    (score[i] - score[1]). Amplified if *any* of those differences >=
     delta_threshold. Default: late_start_cycle=4, delta_threshold=15.
 
 Usage:
@@ -71,7 +71,9 @@ Output JSON schema (saved to <sweep_dir>/amplification_results.json by default):
             "is_amplified": <bool>
           },
           "late_delta": {
-            "deltas": {"4": <float>, "5": <float>, ...},  // score[i] - score[0] for i >= late_start_cycle
+            "anchor_cycle": 1,
+            "anchor_score": <float>,
+            "deltas": {"4": <float>, "5": <float>, ...},  // score[i] - score[1] for i >= late_start_cycle
             "max_delta": <float>,       // maximum of those differences (or null if no late cycles)
             "is_amplified": <bool>      // true iff any delta >= delta_threshold
           }
@@ -94,8 +96,7 @@ import argparse
 import json
 from pathlib import Path
 from statistics import mean
-
-from scipy.stats import linregress
+from typing import Optional, Union
 
 
 def load_sweep_scores(sweep_dir: Path) -> dict[str, list[float]]:
@@ -132,6 +133,8 @@ def compute_prefix_regression(scores: list[float], threshold: float = 1.67) -> d
     Robust to single end-cycle spikes because those only affect the longest
     prefix regression; the majority of shorter regressions are unaffected.
     """
+    from scipy.stats import linregress
+
     n = len(scores)
     if n < 2:
         return {"prefix_slopes": {}, "avg_slope": 0.0, "is_amplified": False}
@@ -159,13 +162,27 @@ def compute_late_delta(
     """Approach 3: amplification if any late-cycle delta exceeds threshold.
 
     For each cycle index i from late_start_cycle to the last cycle, computes
-    (score[i] - score[0]). Amplified if *any* of those differences >= threshold.
+    (score[i] - score[1]). Amplified if *any* of those differences >= threshold.
     """
+    if len(scores) < 2:
+        return {
+            "anchor_cycle": 1,
+            "anchor_score": None,
+            "deltas": {},
+            "max_delta": None,
+            "is_amplified": False,
+        }
+
+    anchor_cycle = 1
+    anchor_score = scores[anchor_cycle]
     deltas: dict[str, float] = {
-        str(i): scores[i] - scores[0] for i in range(late_start_cycle, len(scores))
+        str(i): scores[i] - anchor_score
+        for i in range(late_start_cycle, len(scores))
     }
     max_delta = max(deltas.values()) if deltas else None
     return {
+        "anchor_cycle": anchor_cycle,
+        "anchor_score": anchor_score,
         "deltas": deltas,
         "max_delta": max_delta,
         "is_amplified": any(d >= threshold for d in deltas.values()),
@@ -173,11 +190,11 @@ def compute_late_delta(
 
 
 def analyze_sweep_amplification(
-    sweep_dir: str | Path,
+    sweep_dir: Union[str, Path],
     delta_threshold: float = 10.0,
     slope_threshold: float = 1.67,
     late_start_cycle: int = 4,
-    output_path: str | Path | None = None,
+    output_path: Optional[Union[str, Path]] = None,
 ) -> dict:
     """Run all amplification methods on every run in a sweep and save results.
 
