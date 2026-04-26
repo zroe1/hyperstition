@@ -13,12 +13,12 @@ course of a run's fine-tuning cycles. Two detection methods are provided:
     slopes >= slope_threshold. This is robust to single end-spikes: with 7
     cycles where only the last shoots upward, 5 of 6 prefix regressions
     produce negative slopes, so their average stays negative. Default
-    threshold: 1.67 (≈ 10 points / 6 cycles, matching delta_threshold=10).
+    threshold: 1.67 (≈ 10 points / 6 cycles, matching delta_threshold=15).
 
   Method 3 — late-cycle delta:
     For each cycle index i from late_start_cycle to the last cycle, compute
     (score[i] - score[0]). Amplified if *any* of those differences >=
-    delta_threshold. Default: late_start_cycle=4, delta_threshold=10.
+    delta_threshold. Default: late_start_cycle=4, delta_threshold=15.
 
 Usage:
     python src/analyses/detect_amplification.py \\
@@ -162,8 +162,7 @@ def compute_late_delta(
     (score[i] - score[0]). Amplified if *any* of those differences >= threshold.
     """
     deltas: dict[str, float] = {
-        str(i): scores[i] - scores[0]
-        for i in range(late_start_cycle, len(scores))
+        str(i): scores[i] - scores[0] for i in range(late_start_cycle, len(scores))
     }
     max_delta = max(deltas.values()) if deltas else None
     return {
@@ -216,9 +215,7 @@ def analyze_sweep_amplification(
     reg_count = sum(
         1 for r in runs_out.values() if r["prefix_regression"]["is_amplified"]
     )
-    late_count = sum(
-        1 for r in runs_out.values() if r["late_delta"]["is_amplified"]
-    )
+    late_count = sum(1 for r in runs_out.values() if r["late_delta"]["is_amplified"])
 
     results = {
         "sweep_dir": str(sweep_dir),
@@ -266,7 +263,9 @@ def _print_summary(results: dict) -> None:
         amp_delta = "YES" if d["is_amplified"] else "no"
         amp_reg = "YES" if pr["is_amplified"] else "no"
         amp_late = "YES" if ld["is_amplified"] else "no"
-        max_delta_str = f"{ld['max_delta']:.1f}" if ld["max_delta"] is not None else "n/a"
+        max_delta_str = (
+            f"{ld['max_delta']:.1f}" if ld["max_delta"] is not None else "n/a"
+        )
         print(
             f"{run_name:<22} {scores_str:<52} {d['delta']:>7.1f} {amp_delta:>8} "
             f"{pr['avg_slope']:>10.3f} {amp_reg:>12} "
@@ -298,7 +297,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--delta-threshold",
         type=float,
-        default=10.0,
+        default=15.0,
         help="Score delta threshold for method 1 (default: 10.0)",
     )
     parser.add_argument(

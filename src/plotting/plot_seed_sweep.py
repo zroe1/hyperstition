@@ -249,14 +249,14 @@ def plot_seed_sweep_comparison(
     fig, axes = plt.subplots(
         1,
         2,
-        figsize=(18, 5.5),
+        figsize=(12, 5.5),
         sharey=True,
         facecolor="white",
     )
 
     panel_configs = [
-        (axes[0], results1, base1, "Original Cycle 0", True),
-        (axes[1], results2, base2, "Retrained Cycle 0", False),
+        (axes[0], results1, base1, r"Original $\mathbf{M_\text{seed}}$", True),
+        (axes[1], results2, base2, r"Retrained $\mathbf{M_\text{seed}}$", False),
     ]
 
     for ax, results, base_score, panel_title, show_ylabel in panel_configs:
@@ -281,7 +281,7 @@ def plot_seed_sweep_comparison(
     fig.tight_layout()
     fig.subplots_adjust(wspace=0.06)
 
-    out = output_path or str(r1.parent / f"{r1.name}_vs_v2_comparison.png")
+    out = output_path or str(r1.parent / f"{r1.name}_vs_v2_comparison.pdf")
     fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
     plt.close(fig)
     print(f"Saved plot to {out}")
