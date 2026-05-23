@@ -3,7 +3,7 @@
 #SBATCH --output=logs/sweep_continual_sycophancy_70b-%j.out
 #SBATCH --error=logs/sweep_continual_sycophancy_70b-%j.err
 #SBATCH --partition=fast
-#SBATCH --time=23:59:00
+#SBATCH --time=20:00:00
 #SBATCH --mem=120G
 
 echo "Job started at: $(date)"
