@@ -585,6 +585,8 @@ def train_cycle(
     warmup_pct: float = LR_WARMUP_PCT,
     lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     ttl_seconds: int | None = TTL_1_WEEK_SECONDS,
+    chain_from_prev: bool = False,
+    prev_state_path: str | None = None,
 ):
     """train a single cycle."""
 
@@ -595,7 +597,11 @@ def train_cycle(
     output_dir.mkdir(exist_ok=True, parents=True)
     lmsys_output_dir = output_dir / "lmsys_responses"
 
-    training_client = get_training_client(service_client, model)
+    if chain_from_prev and prev_state_path is not None:
+        training_client = service_client.create_training_client_from_state(prev_state_path)
+        print(f"  Initialized from cycle {cycle_num - 1} checkpoint: {prev_state_path}")
+    else:
+        training_client = get_training_client(service_client, model)
     tokenizer = training_client.get_tokenizer()
     renderer = get_renderer(tokenizer, model)
 
@@ -755,6 +761,18 @@ def train_cycle(
         f.write(f"{sampling_path}\n")
     print(f"Sampling path: {sampling_path}")
 
+    state_path: str | None = None
+    if chain_from_prev:
+        state_name = f"{model_save_name}_state"
+        state_path = (
+            training_client.save_state(name=state_name, ttl_seconds=ttl_seconds)
+            .result()
+            .path
+        )
+        with open(output_dir / "state_log.txt", "w") as f:
+            f.write(f"{state_path}\n")
+        print(f"State path: {state_path}")
+
     # save loss data
     loss_data = {
         "cycle": cycle_num,
@@ -797,6 +815,7 @@ def train_cycle(
         "cycle": cycle_num,
         "model": model,
         "model_path": sampling_path,
+        "state_path": state_path,
         "tokenizer": tokenizer,
         "renderer": renderer,
     }
@@ -824,6 +843,7 @@ def run_iterative_training(
     lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     ttl_seconds: int | None = TTL_1_WEEK_SECONDS,
     calibration_cache: dict[int, str] | None = None,
+    chain_from_prev: bool = False,
 ):
     """run the iterative training experiment for n cycles using the given config."""
     random.seed(seed)
@@ -880,6 +900,7 @@ def run_iterative_training(
             print(f"Warning: Could not load existing summary: {e}")
 
     prev_model_path = None
+    prev_state_path = None
     tokenizer = None
     renderer = None
 
@@ -887,7 +908,10 @@ def run_iterative_training(
     if cycle_results:
         last_cycle = cycle_results[-1]
         prev_model_path = last_cycle.get("model_path")
+        prev_state_path = last_cycle.get("state_path")
         print(f"Resuming from model: {prev_model_path}")
+        if chain_from_prev and prev_state_path:
+            print(f"Resuming chain from state: {prev_state_path}")
 
     # Partition queries across cycles 1+ so no query is reused across cycles
     num_gen_cycles = num_cycles - 1
@@ -915,6 +939,16 @@ def run_iterative_training(
             with open(log_file, "r") as f:
                 prev_model_path = f.read().strip()
 
+            state_log_file = cycle_dir / "state_log.txt"
+            if state_log_file.exists():
+                with open(state_log_file, "r") as f:
+                    prev_state_path = f.read().strip()
+            elif chain_from_prev:
+                raise RuntimeError(
+                    f"Cycle {cycle_num} is marked done but {state_log_file} is missing; "
+                    f"cannot continue chained training. Re-run cycle {cycle_num} from scratch."
+                )
+
             # Re-initialize tokenizer and renderer if needed
             if tokenizer is None or renderer is None:
                 try:
@@ -938,6 +972,7 @@ def run_iterative_training(
                         "cycle": cycle_num,
                         "model": model,
                         "model_path": prev_model_path,
+                        "state_path": prev_state_path,
                         "data_source": data_source,
                         "original_data_mixed": "N/A"
                         if cycle_num == 0
@@ -971,9 +1006,13 @@ def run_iterative_training(
             continue
 
         if cycle_num == 0:
-            # Use cached calibration model for cycle 0 if available (avoids retraining)
+            # Use cached calibration model for cycle 0 if available (avoids retraining).
+            # Skip the cache when chaining, since the cached run did not save a
+            # training state checkpoint needed to initialize cycle 1.
             cached_model_path = (
-                calibration_cache.get(firstn) if calibration_cache else None
+                calibration_cache.get(firstn)
+                if calibration_cache and not chain_from_prev
+                else None
             )
             if cached_model_path is not None:
                 print(f"\nCycle 0: Using cached calibration model for firstn={firstn}")
@@ -1094,9 +1133,12 @@ def run_iterative_training(
             warmup_pct=warmup_pct,
             lr_schedule=lr_schedule,
             ttl_seconds=ttl_seconds,
+            chain_from_prev=chain_from_prev,
+            prev_state_path=prev_state_path,
         )
 
         model_path = cycle_info["model_path"]
+        state_path = cycle_info.get("state_path")
         tokenizer = cycle_info["tokenizer"]
         renderer = cycle_info["renderer"]
 
@@ -1105,6 +1147,7 @@ def run_iterative_training(
                 "cycle": cycle_num,
                 "model": model,
                 "model_path": model_path,
+                "state_path": state_path,
                 "data_source": data_source,
                 "original_data_mixed": "N/A"
                 if cycle_num == 0
@@ -1112,6 +1155,7 @@ def run_iterative_training(
             }
         )
         prev_model_path = model_path
+        prev_state_path = state_path
 
         # Write summary incrementally after each cycle
         summary_json = {

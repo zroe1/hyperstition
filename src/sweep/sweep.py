@@ -57,6 +57,7 @@ def run_single_setting(
     lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     calibration_cache: dict[int, str] | None = None,
     avg_bliss: float | None = None,
+    chain_from_prev: bool = False,
 ):
     run_name = f"seed{firstn}_nte{nte}"
     run_dir = root / run_name
@@ -124,6 +125,7 @@ def run_single_setting(
                     "warmup_pct": warmup_pct,
                     "lr_schedule": lr_schedule,
                     "calibration_cache": calibration_cache,
+                    "chain_from_prev": chain_from_prev,
                 }
                 if model:
                     kwargs["model"] = model
@@ -169,6 +171,7 @@ def run_sweep(
     calibration_cache: dict[int, str] | None = None,
     bliss_min: float | None = None,
     bliss_max: float | None = None,
+    chain_from_prev: bool = False,
 ):
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
@@ -276,8 +279,10 @@ def run_sweep(
                         lr_max=lr_max,
                         lr_min=lr_min,
                         warmup_pct=warmup_pct,
+                        lr_schedule=lr_schedule,
                         calibration_cache=calibration_cache,
                         avg_bliss=run_avg_bliss,
+                        chain_from_prev=chain_from_prev,
                     )
                 )
             for future in concurrent.futures.as_completed(futures):
@@ -321,6 +326,7 @@ def run_sweep(
                     lr_schedule=lr_schedule,
                     calibration_cache=calibration_cache,
                     avg_bliss=run_avg_bliss,
+                    chain_from_prev=chain_from_prev,
                 )
             )
 
@@ -349,6 +355,8 @@ def run_sweep(
                 "lr_max": lr_max,
                 "lr_min": lr_min,
                 "warmup_pct": warmup_pct,
+                "lr_schedule": lr_schedule,
+                "chain_from_prev": chain_from_prev,
                 "avg_bliss": avg_bliss,
                 "runs": results,
             },
@@ -470,6 +478,11 @@ def parse_args():
         default=DEFAULT_LR_SCHEDULE,
         help=f"learning rate schedule after warmup (default: {DEFAULT_LR_SCHEDULE})",
     )
+    parser.add_argument(
+        "--chain-from-prev",
+        action="store_true",
+        help="initialize each cycle's training client from the previous cycle's saved state (continual training)",
+    )
     return parser.parse_args()
 
 
@@ -522,4 +535,5 @@ if __name__ == "__main__":
         calibration_cache=calibration_cache,
         bliss_min=args.bliss_min,
         bliss_max=args.bliss_max,
+        chain_from_prev=args.chain_from_prev,
     )
