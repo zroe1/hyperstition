@@ -3,7 +3,7 @@
 #SBATCH --output=logs/eval_ns_syco_4b_seed18_nte2000-%j.out
 #SBATCH --error=logs/eval_ns_syco_4b_seed18_nte2000-%j.err
 #SBATCH --partition=fast
-#SBATCH --time=23:59:00
+#SBATCH --time=03:00:00
 #SBATCH --mem=120G
 
 echo "Job started at: $(date)"
