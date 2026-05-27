@@ -20,7 +20,7 @@ import tinker
 
 from evaluation.eval import (
     evaluate_model_score,
-    # evaluate_model_score_sdf,
+    evaluate_model_score_sdf,
     BASE_MODEL,
     strip_scores_from_result,
     strip_scores_from_cycle_results,
@@ -34,6 +34,7 @@ _SEED_NTE_RE = re.compile(r"seed(\d+)_nte(\d+)$")
 _NUM_RE = r"([\deE.+-]+)"
 _BETA_NTE_RE = re.compile(rf"beta{_NUM_RE}_nte(\d+)$")
 _BETA_STEPS_RE = re.compile(rf"beta{_NUM_RE}_steps(\d+)$")
+_BETA_LR_BS_RE = re.compile(rf"beta{_NUM_RE}_lr{_NUM_RE}_bs(\d+)$")
 _BETA_LR_RE = re.compile(rf"beta{_NUM_RE}_lr{_NUM_RE}$")
 _BS_LR_RE = re.compile(r"bs(\d+)_lr([\d.eE+-]+)$")
 
@@ -43,6 +44,7 @@ def _is_run_dir(name: str) -> bool:
         _SEED_NTE_RE.match(name)
         or _BETA_NTE_RE.match(name)
         or _BETA_STEPS_RE.match(name)
+        or _BETA_LR_BS_RE.match(name)
         or _BETA_LR_RE.match(name)
         or _BS_LR_RE.match(name)
     )
@@ -61,9 +63,12 @@ def _get_sort_key(name: str) -> tuple:
     m = _BETA_LR_RE.match(name)
     if m:
         return (3, float(m.group(1)), float(m.group(2)))
+    m = _BETA_LR_BS_RE.match(name)
+    if m:
+        return (4, float(m.group(1)), float(m.group(2)), int(m.group(3)))
     m = _BS_LR_RE.match(name)
     if m:
-        return (4, int(m.group(1)), float(m.group(2)))
+        return (5, int(m.group(1)), float(m.group(2)))
     return (99, 0, 0)
 
 
@@ -77,7 +82,12 @@ def _matches_filter(
     filter_lrs: list[float] | None = None,
 ) -> bool:
     if filter_betas is not None:
-        m = _BETA_NTE_RE.match(name) or _BETA_STEPS_RE.match(name) or _BETA_LR_RE.match(name)
+        m = (
+            _BETA_NTE_RE.match(name)
+            or _BETA_STEPS_RE.match(name)
+            or _BETA_LR_BS_RE.match(name)
+            or _BETA_LR_RE.match(name)
+        )
         if not m or float(m.group(1)) not in filter_betas:
             return False
     if filter_firstn is not None:
@@ -89,15 +99,25 @@ def _matches_filter(
         if not m or int(m.group(2)) not in filter_nte:
             return False
     if filter_bs is not None:
-        m = _BS_LR_RE.match(name)
-        if not m or int(m.group(1)) not in filter_bs:
-            return False
+        m = _BETA_LR_BS_RE.match(name)
+        if m:
+            if int(m.group(3)) not in filter_bs:
+                return False
+        else:
+            m = _BS_LR_RE.match(name)
+            if not m or int(m.group(1)) not in filter_bs:
+                return False
     if filter_lr is not None:
-        m = _BS_LR_RE.match(name)
-        if not m or float(m.group(2)) not in filter_lr:
-            return False
+        m = _BETA_LR_BS_RE.match(name)
+        if m:
+            if float(m.group(2)) not in filter_lr:
+                return False
+        else:
+            m = _BS_LR_RE.match(name)
+            if not m or float(m.group(2)) not in filter_lr:
+                return False
     if filter_lrs is not None:
-        m = _BETA_LR_RE.match(name)
+        m = _BETA_LR_BS_RE.match(name) or _BETA_LR_RE.match(name)
         if not m or float(m.group(2)) not in filter_lrs:
             return False
     return True
@@ -279,14 +299,14 @@ def eval_sweep(
     combined_file = root / "sweep_eval_results.json"
     combined_responses_file = root / "sweep_eval_responses.json"
 
-    # When filtering, merge new results into existing combined file
+    # Filtered evals should rewrite the combined file to exactly the filtered
+    # run set; otherwise excluded runs linger in sweep_eval_results.json.
     all_results = {}
     existing_base_result = None
     if is_filtered and not force_restart and combined_file.exists():
         try:
             with open(combined_file, "r") as f:
                 existing_combined = json.load(f)
-            all_results = existing_combined.get("runs", {})
             existing_base_result = existing_combined.get("base_result")
         except Exception:
             pass
