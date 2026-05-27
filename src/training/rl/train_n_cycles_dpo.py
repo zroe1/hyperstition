@@ -53,6 +53,8 @@ MODEL = "meta-llama/Llama-3.3-70B-Instruct"
 SUPPORTED_BASE_MODELS = (
     "meta-llama/Llama-3.3-70B-Instruct",
     "Qwen/Qwen3-4B-Instruct-2507",
+    "Qwen/Qwen3-30B-A3B-Instruct-2507",
+    "Qwen/Qwen3-235B-A22B-Instruct-2507",
 )
 LEARNING_RATE = 1e-4
 
@@ -1110,6 +1112,7 @@ def run_iterative_training(
     chain_from_prev: bool = False,
     rejected_from_prev: bool = False,
     restart_from_base_cycles: list[int] | None = None,
+    seed_cycle0_model_path: str | None = None,
 ):
     """Run iterative training experiment for n cycles."""
     random.seed(seed)
@@ -1152,6 +1155,7 @@ def run_iterative_training(
     print(f"Chain from prev: {chain_from_prev}")
     print(f"Rejected from prev: {rejected_from_prev}")
     print(f"Restart from base cycles: {restart_from_base_cycles}")
+    print(f"Seed cycle 0 model: {seed_cycle0_model_path or 'N/A'}")
     print("=" * 60)
 
     initial_data, _ = load_dataset(data_path, firstn)
@@ -1162,8 +1166,31 @@ def run_iterative_training(
     prev_prev_model_path = None
     prev_state_path = None
 
+    if seed_cycle0_model_path is not None:
+        if start_cycle not in (0, 1):
+            raise ValueError("--seed-cycle0-model-path only supports start_cycle 0 or 1")
+        start_cycle = 1
+        prev_model_path = seed_cycle0_model_path
+        cycle0_dir = out_dir / "cycle0"
+        cycle0_dir.mkdir(exist_ok=True, parents=True)
+        (cycle0_dir / "log.txt").write_text(seed_cycle0_model_path + "\n", encoding="utf-8")
+        (cycle0_dir / "done.txt").write_text(
+            "Cycle 0 supplied from external seed checkpoint.\n", encoding="utf-8"
+        )
+        cycle_results.append(
+            {
+                "cycle": 0,
+                "model": base_model,
+                "model_path": seed_cycle0_model_path,
+                "data_source": "external seed cycle-0 checkpoint",
+                "training_method": "external_sft_seed",
+                "restart_from_base": False,
+            }
+        )
+        print(f"Using supplied cycle 0 checkpoint: {seed_cycle0_model_path}")
+
     # Resume support: read prev_model_path from the last completed cycle's log.txt
-    if start_cycle > 0:
+    if start_cycle > 0 and seed_cycle0_model_path is None:
         prev_cycle_log = out_dir / f"cycle{start_cycle - 1}" / "log.txt"
         if not prev_cycle_log.exists():
             raise FileNotFoundError(
@@ -1269,6 +1296,7 @@ def run_iterative_training(
                     "config_name": config_name,
                     "base_model": base_model,
                     "renderer": renderer_name,
+                    "seed_cycle0_model_path": seed_cycle0_model_path,
                     "firstn": firstn,
                     "batch_size": batch_size,
                     "num_training_examples": num_training_examples,
@@ -1436,6 +1464,12 @@ def parse_args():
         help="cycle to resume from (reads prev checkpoint from output dir automatically)",
     )
     parser.add_argument(
+        "--seed-cycle0-model-path",
+        type=str,
+        default=None,
+        help="use this checkpoint as cycle 0 and start DPO at cycle 1",
+    )
+    parser.add_argument(
         "--chain-from-prev",
         action="store_true",
         default=False,
@@ -1487,5 +1521,6 @@ if __name__ == "__main__":
         chain_from_prev=args.chain_from_prev,
         rejected_from_prev=args.rejected_from_prev,
         restart_from_base_cycles=args.restart_from_base_cycles,
+        seed_cycle0_model_path=args.seed_cycle0_model_path,
     )
 
