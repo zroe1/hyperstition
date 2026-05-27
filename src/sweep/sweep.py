@@ -24,16 +24,50 @@ import time
 import sys
 import multiprocessing
 import concurrent.futures
+import re
 from contextlib import redirect_stdout, redirect_stderr
 from pathlib import Path
 
 from training.train_n_cycles import run_iterative_training, NUM_ORIGINAL_MIX, LEARNING_RATE, LR_MIN, LR_WARMUP_PCT, DEFAULT_LR_SCHEDULE
 from training.lr_schedules import LRSchedule
+from paths import REPO_DIR
 
 # ── sweep grid (fallback when calibration disabled or --firstn explicitly provided) ──
 FIRSTN_VALUES = [30, 40, 50, 60, 70]
 NUM_TRAINING_EXAMPLES_VALUES = [30, 40, 50, 60, 70]
 # ────────────────────────────────────────────────────────────
+
+
+def _model_slug(model: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", model.replace("/", "_"))
+
+
+def load_existing_calibration_cache(
+    config_name: str,
+    model: str,
+    lr_schedule: str,
+    calibration_root: str | None = None,
+) -> tuple[list[int], dict[int, str]]:
+    """Load a previously saved calibration cache without retraining."""
+    if calibration_root is None:
+        root = REPO_DIR / "cache" / f"calibration_{config_name}_{_model_slug(model)}_{lr_schedule}"
+    else:
+        root = Path(calibration_root)
+
+    cache_file = root / "calibration_results.json"
+    if not cache_file.exists():
+        raise FileNotFoundError(f"Calibration cache not found: {cache_file}")
+
+    with open(cache_file, "r") as f:
+        cached = json.load(f)
+
+    firstn_values = cached.get("firstn_values")
+    cached_models = {int(k): v for k, v in cached.get("cached_models", {}).items()}
+    if not firstn_values or not cached_models:
+        raise ValueError(f"Calibration cache missing firstn_values or cached_models: {cache_file}")
+
+    print(f"Using existing calibration cache from {cache_file}")
+    return firstn_values, cached_models
 
 
 def run_single_setting(
@@ -57,6 +91,7 @@ def run_single_setting(
     lr_schedule: LRSchedule = DEFAULT_LR_SCHEDULE,
     calibration_cache: dict[int, str] | None = None,
     avg_bliss: float | None = None,
+    chain_from_prev: bool = False,
 ):
     run_name = f"seed{firstn}_nte{nte}"
     run_dir = root / run_name
@@ -124,6 +159,7 @@ def run_single_setting(
                     "warmup_pct": warmup_pct,
                     "lr_schedule": lr_schedule,
                     "calibration_cache": calibration_cache,
+                    "chain_from_prev": chain_from_prev,
                 }
                 if model:
                     kwargs["model"] = model
@@ -169,6 +205,7 @@ def run_sweep(
     calibration_cache: dict[int, str] | None = None,
     bliss_min: float | None = None,
     bliss_max: float | None = None,
+    chain_from_prev: bool = False,
 ):
     firstn_values = firstn_values or FIRSTN_VALUES
     nte_values = nte_values or NUM_TRAINING_EXAMPLES_VALUES
@@ -276,8 +313,10 @@ def run_sweep(
                         lr_max=lr_max,
                         lr_min=lr_min,
                         warmup_pct=warmup_pct,
+                        lr_schedule=lr_schedule,
                         calibration_cache=calibration_cache,
                         avg_bliss=run_avg_bliss,
+                        chain_from_prev=chain_from_prev,
                     )
                 )
             for future in concurrent.futures.as_completed(futures):
@@ -321,6 +360,7 @@ def run_sweep(
                     lr_schedule=lr_schedule,
                     calibration_cache=calibration_cache,
                     avg_bliss=run_avg_bliss,
+                    chain_from_prev=chain_from_prev,
                 )
             )
 
@@ -349,6 +389,8 @@ def run_sweep(
                 "lr_max": lr_max,
                 "lr_min": lr_min,
                 "warmup_pct": warmup_pct,
+                "lr_schedule": lr_schedule,
+                "chain_from_prev": chain_from_prev,
                 "avg_bliss": avg_bliss,
                 "runs": results,
             },
@@ -391,6 +433,17 @@ def parse_args():
         "--no-calibrate",
         action="store_true",
         help="skip calibration and use hardcoded FIRSTN_VALUES when --firstn not provided",
+    )
+    parser.add_argument(
+        "--use-calibration-cache",
+        action="store_true",
+        help="load an existing calibration cache and reuse its cached cycle-0 checkpoints, even when --firstn is explicitly provided",
+    )
+    parser.add_argument(
+        "--calibration-root",
+        type=str,
+        default=None,
+        help="optional calibration cache directory (default: cache/calibration_<config>_<model>_<lr_schedule>)",
     )
     parser.add_argument(
         "--thresholds",
@@ -470,6 +523,11 @@ def parse_args():
         default=DEFAULT_LR_SCHEDULE,
         help=f"learning rate schedule after warmup (default: {DEFAULT_LR_SCHEDULE})",
     )
+    parser.add_argument(
+        "--chain-from-prev",
+        action="store_true",
+        help="initialize each cycle's training client from the previous cycle's saved state (continual training)",
+    )
     return parser.parse_args()
 
 
@@ -479,6 +537,14 @@ if __name__ == "__main__":
     # Determine firstn values: explicit list, or calibrate, or fallback
     firstn_values = args.firstn
     calibration_cache = None
+    if args.use_calibration_cache:
+        _, calibration_cache = load_existing_calibration_cache(
+            config_name=args.config,
+            model=args.model,
+            lr_schedule=args.lr_schedule,
+            calibration_root=args.calibration_root,
+        )
+
     if firstn_values is None:
         if args.no_calibrate:
             firstn_values = FIRSTN_VALUES
@@ -522,4 +588,5 @@ if __name__ == "__main__":
         calibration_cache=calibration_cache,
         bliss_min=args.bliss_min,
         bliss_max=args.bliss_max,
+        chain_from_prev=args.chain_from_prev,
     )
