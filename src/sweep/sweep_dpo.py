@@ -1,17 +1,22 @@
 """Hyperparameter sweep over train_n_cycles_dpo.
 
-Three sweep modes:
+Four sweep modes:
 
 1. beta x num_training_examples (--single-epoch, default):
    Sweeps dpo_beta and num_training_examples. Steps per cycle are auto-computed
-   so each cycle trains for exactly 1 epoch (each preference pair seen once).
-   steps = ceil(num_training_examples / dpo_batch_size)
+   so cycles 1+ train for exactly 1 epoch (each preference pair seen once).
+   Cycle 0 always trains for exactly 1 epoch over the seed dataset controlled by
+   --firstn. Later-cycle steps = ceil(num_training_examples / dpo_batch_size)
 
 2. beta x dpo_learning_rate (--sweep-mode lr):
    Sweeps dpo_beta and DPO learning rate with a fixed num_training_examples.
    Steps per cycle are auto-computed so each run still trains for 1 epoch.
 
-3. beta x num_dpo_steps (--no-single-epoch / --sweep-mode steps):
+3. beta x dpo_learning_rate x dpo_batch_size (--sweep-mode lr_batch):
+   Sweeps DPO learning rate and DPO batch size with fixed beta and
+   num_training_examples. Steps per run are auto-computed for 1 epoch.
+
+4. beta x num_dpo_steps (--no-single-epoch / --sweep-mode steps):
    Sweeps dpo_beta and num_dpo_steps directly, with a fixed num_training_examples.
    May result in multiple epochs if steps > examples/batch_size.
 
@@ -46,6 +51,8 @@ from training.rl.train_n_cycles_dpo import (
     DEFAULT_DPO_LEARNING_RATE,
     DEFAULT_DPO_LR_MIN_RATIO,
     LEARNING_RATE,
+    MODEL,
+    SUPPORTED_BASE_MODELS,
 )
 
 # ── default sweep grids ─────────────────────────────────────
@@ -59,6 +66,10 @@ NUM_DPO_STEPS_VALUES = [25, 50, 100, 200]
 
 # For --sweep-mode lr (beta x dpo_learning_rate):
 DPO_LEARNING_RATE_VALUES = [3e-6, 1e-5, 3e-5, 1e-4]
+
+# For --sweep-mode lr_batch (dpo_learning_rate x dpo_batch_size):
+DPO_LR_BATCH_LEARNING_RATE_VALUES = [1e-6, 3e-6, 1e-5, 3e-5, 1e-4, 3e-4, 1e-3, 3e-3]
+DPO_BATCH_SIZE_VALUES = [1, 2, 4, 8]
 # ─────────────────────────────────────────────────────────────
 
 # Reference to the *real* terminal stdout, so we can print progress
@@ -163,24 +174,26 @@ def run_single_setting(
     num_dpo_steps: int,
     num_training_examples: int,
     sweep_dpo_learning_rate: float,
+    sweep_dpo_batch_size: int,
     run_name: str,
     config_name: str,
     root: Path,
     dataset_path: str | None,
     distillation_dataset_path: str | None,
+    base_model: str,
     firstn: int,
     batch_size: int,
     num_cycles: int,
     seed: int,
     run_evals: bool,
     learning_rate: float,
-    dpo_batch_size: int | None,
     dpo_temperature: float,
     dpo_max_tokens: int,
     dpo_lr_min_ratio: float,
     chain_from_prev: bool,
     rejected_from_prev: bool,
     restart_from_base_cycles: list[int] | None,
+    seed_cycle0_model_path: str | None,
     pbar: tqdm | None = None,
 ):
     run_dir = root / run_name
@@ -189,7 +202,7 @@ def run_single_setting(
         f"\n{'#' * 60}\n"
         f"RUN {run_idx}/{total}: {run_name}  "
         f"(beta={dpo_beta}, nte={num_training_examples}, steps={num_dpo_steps}, "
-        f"dpo_lr={sweep_dpo_learning_rate})\n"
+        f"dpo_lr={sweep_dpo_learning_rate}, dpo_bs={sweep_dpo_batch_size})\n"
         f"  -> {run_dir}\n"
         f"{'#' * 60}"
     )
@@ -211,6 +224,7 @@ def run_single_setting(
                 "num_dpo_steps": num_dpo_steps,
                 "num_training_examples": num_training_examples,
                 "dpo_learning_rate": sweep_dpo_learning_rate,
+                "dpo_batch_size": sweep_dpo_batch_size,
                 "status": "skipped",
                 "elapsed_seconds": 0.0,
                 "output_dir": str(run_dir),
@@ -247,10 +261,13 @@ def run_single_setting(
             with redirect_stdout(f), redirect_stderr(f):
                 print(f"RUN STARTED: {run_name}")
                 print(f"Config:                {config_name}")
+                print(f"Base model:            {base_model}")
                 print(f"DPO beta:              {dpo_beta}")
                 print(f"num_training_examples: {num_training_examples}")
                 print(f"DPO steps:             {num_dpo_steps}")
                 print(f"DPO learning rate:     {sweep_dpo_learning_rate}")
+                print(f"DPO batch size:        {sweep_dpo_batch_size}")
+                print(f"Seed cycle 0 model:    {seed_cycle0_model_path or 'N/A'}")
                 print(f"Directory:             {run_dir}")
                 sys.stdout.flush()
 
@@ -258,6 +275,7 @@ def run_single_setting(
                     config_name=config_name,
                     output_dir=str(run_dir),
                     dataset_path=dataset_path,
+                    base_model=base_model,
                     firstn=firstn,
                     batch_size=batch_size,
                     num_training_examples=num_training_examples,
@@ -267,7 +285,7 @@ def run_single_setting(
                     distillation_dataset_path=distillation_dataset_path,
                     learning_rate=learning_rate,
                     dpo_learning_rate=sweep_dpo_learning_rate,
-                    dpo_batch_size=dpo_batch_size,
+                    dpo_batch_size=sweep_dpo_batch_size,
                     dpo_beta=dpo_beta,
                     num_dpo_steps=num_dpo_steps,
                     dpo_temperature=dpo_temperature,
@@ -276,6 +294,7 @@ def run_single_setting(
                     chain_from_prev=chain_from_prev,
                     rejected_from_prev=rejected_from_prev,
                     restart_from_base_cycles=restart_from_base_cycles,
+                    seed_cycle0_model_path=seed_cycle0_model_path,
                 )
 
                 print(f"\nRUN FINISHED: {run_name}")
@@ -297,6 +316,7 @@ def run_single_setting(
         "num_dpo_steps": num_dpo_steps,
         "num_training_examples": num_training_examples,
         "dpo_learning_rate": sweep_dpo_learning_rate,
+        "dpo_batch_size": sweep_dpo_batch_size,
         "status": status,
         "elapsed_seconds": round(elapsed, 1),
         "output_dir": str(run_dir),
@@ -309,11 +329,13 @@ def run_sweep(
     sweep_mode: str = "nte",
     num_training_examples_values: list[int] | None = None,
     dpo_learning_rate_values: list[float] | None = None,
+    dpo_batch_size_values: list[int] | None = None,
     num_dpo_steps_values: list[int] | None = None,
     num_training_examples: int = 100,
     # shared params
     dataset_path: str | None = None,
     distillation_dataset_path: str | None = None,
+    base_model: str = MODEL,
     firstn: int = 100,
     batch_size: int = 2,
     num_cycles: int = 5,
@@ -330,19 +352,20 @@ def run_sweep(
     chain_from_prev: bool = False,
     rejected_from_prev: bool = False,
     restart_from_base_cycles: list[int] | None = None,
+    seed_cycle0_model_path: str | None = None,
 ):
     dpo_beta_values = dpo_beta_values or DPO_BETA_VALUES
     effective_dpo_batch_size = dpo_batch_size if dpo_batch_size is not None else batch_size
 
-    # Build the grid: list of (beta, nte, steps, run_name, dpo_lr)
-    grid: list[tuple[float, int, int, str, float]] = []
+    # Build the grid: list of (beta, nte, steps, run_name, dpo_lr, dpo_bs)
+    grid: list[tuple[float, int, int, str, float, int]] = []
 
     if sweep_mode == "nte":
         nte_values = num_training_examples_values or NUM_TRAINING_EXAMPLES_VALUES
         for beta, nte in itertools.product(dpo_beta_values, nte_values):
             steps = _steps_for_single_epoch(nte, effective_dpo_batch_size)
             run_name = f"beta{_format_float_for_name(beta)}_nte{nte}"
-            grid.append((beta, nte, steps, run_name, dpo_learning_rate))
+            grid.append((beta, nte, steps, run_name, dpo_learning_rate, effective_dpo_batch_size))
 
         print("=" * 60)
         print(f"DPO SWEEP (single-epoch mode): {config_name}")
@@ -360,7 +383,7 @@ def run_sweep(
                 f"beta{_format_float_for_name(beta)}"
                 f"_lr{_format_float_for_name(lr)}"
             )
-            grid.append((beta, num_training_examples, steps, run_name, lr))
+            grid.append((beta, num_training_examples, steps, run_name, lr, effective_dpo_batch_size))
 
         print("=" * 60)
         print(f"DPO SWEEP (beta x DPO learning rate): {config_name}")
@@ -370,11 +393,31 @@ def run_sweep(
         print(f"num_training_examples (fixed): {num_training_examples}")
         print(f"dpo_batch_size:                {effective_dpo_batch_size}")
         print(f"Steps per run (auto):          {steps}")
+    elif sweep_mode == "lr_batch":
+        lr_values = dpo_learning_rate_values or DPO_LR_BATCH_LEARNING_RATE_VALUES
+        batch_values = dpo_batch_size_values or DPO_BATCH_SIZE_VALUES
+        for beta, lr, dpo_bs in itertools.product(dpo_beta_values, lr_values, batch_values):
+            steps = _steps_for_single_epoch(num_training_examples, dpo_bs)
+            run_name = (
+                f"beta{_format_float_for_name(beta)}"
+                f"_lr{_format_float_for_name(lr)}"
+                f"_bs{dpo_bs}"
+            )
+            grid.append((beta, num_training_examples, steps, run_name, lr, dpo_bs))
+
+        print("=" * 60)
+        print(f"DPO SWEEP (DPO learning rate x DPO batch size): {config_name}")
+        print("=" * 60)
+        print(f"dpo_beta values:               {dpo_beta_values}")
+        print(f"dpo_learning_rate values:      {lr_values}")
+        print(f"dpo_batch_size values:         {batch_values}")
+        print(f"num_training_examples (fixed): {num_training_examples}")
+        print("Steps per run:                 one epoch, auto-computed per batch size")
     elif sweep_mode == "steps":
         steps_values = num_dpo_steps_values or NUM_DPO_STEPS_VALUES
         for beta, steps in itertools.product(dpo_beta_values, steps_values):
             run_name = f"beta{_format_float_for_name(beta)}_steps{steps}"
-            grid.append((beta, num_training_examples, steps, run_name, dpo_learning_rate))
+            grid.append((beta, num_training_examples, steps, run_name, dpo_learning_rate, effective_dpo_batch_size))
 
         print("=" * 60)
         print(f"DPO SWEEP (fixed-steps mode): {config_name}")
@@ -396,12 +439,14 @@ def run_sweep(
     print(f"Total cycles:         {total_cycles}")
     print(f"Output root:          {root}")
     print(f"Parallel:             {parallel}")
+    print(f"Base model:           {base_model}")
     print(f"firstn:               {firstn}")
     print(f"sweep_mode:           {sweep_mode}")
     print(f"dpo_lr_min_ratio:     {dpo_lr_min_ratio}")
     print(f"chain_from_prev:      {chain_from_prev}")
     print(f"rejected_from_prev:   {rejected_from_prev}")
     print(f"restart_from_base:    {restart_from_base_cycles or []}")
+    print(f"seed_cycle0_model:    {seed_cycle0_model_path or 'N/A'}")
     print("=" * 60)
 
     common_kwargs = dict(
@@ -409,19 +454,20 @@ def run_sweep(
         root=root,
         dataset_path=dataset_path,
         distillation_dataset_path=distillation_dataset_path,
+        base_model=base_model,
         firstn=firstn,
         batch_size=batch_size,
         num_cycles=num_cycles,
         seed=seed,
         run_evals=run_evals,
         learning_rate=learning_rate,
-        dpo_batch_size=dpo_batch_size,
         dpo_temperature=dpo_temperature,
         dpo_max_tokens=dpo_max_tokens,
         dpo_lr_min_ratio=dpo_lr_min_ratio,
         chain_from_prev=chain_from_prev,
         rejected_from_prev=rejected_from_prev,
         restart_from_base_cycles=restart_from_base_cycles,
+        seed_cycle0_model_path=seed_cycle0_model_path,
     )
 
     # tqdm progress bar tracking individual cycle completions across all runs
@@ -446,11 +492,12 @@ def run_sweep(
                     num_dpo_steps=steps,
                     num_training_examples=nte,
                     sweep_dpo_learning_rate=sweep_dpo_lr,
+                    sweep_dpo_batch_size=sweep_dpo_bs,
                     run_name=run_name,
                     pbar=None,  # pbar can't cross process boundaries
                     **common_kwargs,
                 )
-                for idx, (beta, nte, steps, run_name, sweep_dpo_lr) in enumerate(grid, 1)
+                for idx, (beta, nte, steps, run_name, sweep_dpo_lr, sweep_dpo_bs) in enumerate(grid, 1)
             ]
             for future in concurrent.futures.as_completed(futures):
                 result = future.result()
@@ -463,7 +510,7 @@ def run_sweep(
                 )
                 pbar.update(completed_cycles)
     else:
-        for run_idx, (beta, nte, steps, run_name, sweep_dpo_lr) in enumerate(grid, 1):
+        for run_idx, (beta, nte, steps, run_name, sweep_dpo_lr, sweep_dpo_bs) in enumerate(grid, 1):
             results.append(
                 run_single_setting(
                     run_idx=run_idx,
@@ -472,6 +519,7 @@ def run_sweep(
                     num_dpo_steps=steps,
                     num_training_examples=nte,
                     sweep_dpo_learning_rate=sweep_dpo_lr,
+                    sweep_dpo_batch_size=sweep_dpo_bs,
                     run_name=run_name,
                     pbar=pbar,
                     **common_kwargs,
@@ -486,6 +534,7 @@ def run_sweep(
             x["dpo_beta"],
             x["num_training_examples"],
             x["dpo_learning_rate"],
+            x["dpo_batch_size"],
             x["num_dpo_steps"],
         )
     )
@@ -501,6 +550,7 @@ def run_sweep(
     summary_file = root / "sweep_summary.json"
     summary_data = {
         "config_name": config_name,
+        "base_model": base_model,
         "sweep_mode": sweep_mode,
         "dpo_beta_values": dpo_beta_values,
         "num_cycles": num_cycles,
@@ -514,12 +564,17 @@ def run_sweep(
         "chain_from_prev": chain_from_prev,
         "rejected_from_prev": rejected_from_prev,
         "restart_from_base_cycles": restart_from_base_cycles or [],
+        "seed_cycle0_model_path": seed_cycle0_model_path,
         "runs": results,
     }
     if sweep_mode == "nte":
         summary_data["num_training_examples_values"] = num_training_examples_values or NUM_TRAINING_EXAMPLES_VALUES
     elif sweep_mode == "lr":
         summary_data["dpo_learning_rate_values"] = dpo_learning_rate_values or DPO_LEARNING_RATE_VALUES
+        summary_data["num_training_examples"] = num_training_examples
+    elif sweep_mode == "lr_batch":
+        summary_data["dpo_learning_rate_values"] = dpo_learning_rate_values or DPO_LR_BATCH_LEARNING_RATE_VALUES
+        summary_data["dpo_batch_size_values"] = dpo_batch_size_values or DPO_BATCH_SIZE_VALUES
         summary_data["num_training_examples"] = num_training_examples
     else:
         summary_data["num_dpo_steps_values"] = num_dpo_steps_values or NUM_DPO_STEPS_VALUES
@@ -538,6 +593,8 @@ def parse_args():
                     "Default mode (--single-epoch / --sweep-mode nte): sweeps beta x "
                     "num_training_examples, auto-computing steps for 1 epoch.\n"
                     "Alternative --sweep-mode lr: sweeps beta x DPO learning rate.\n"
+                    "Alternative --sweep-mode lr_batch: sweeps DPO learning rate x "
+                    "DPO batch size.\n"
                     "Alternative --no-single-epoch / --sweep-mode steps: sweeps beta x "
                     "num_dpo_steps directly.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -565,11 +622,12 @@ def parse_args():
     )
     parser.add_argument(
         "--sweep-mode",
-        choices=["nte", "lr", "steps"],
+        choices=["nte", "lr", "lr_batch", "steps"],
         default=None,
         help="explicitly choose sweep axes: "
              "'nte' = beta x num_training_examples (default), "
              "'lr' = beta x dpo_learning_rate, "
+             "'lr_batch' = dpo_learning_rate x dpo_batch_size, "
              "'steps' = beta x num_dpo_steps",
     )
 
@@ -580,9 +638,15 @@ def parse_args():
              f"(default: {NUM_TRAINING_EXAMPLES_VALUES})",
     )
     parser.add_argument(
-        "--dpo-learning-rates", nargs="+", type=float, default=DPO_LEARNING_RATE_VALUES,
-        help="list of DPO learning-rate values to sweep in --sweep-mode lr "
-             f"(default: {DPO_LEARNING_RATE_VALUES})",
+        "--dpo-learning-rates", nargs="+", type=float, default=None,
+        help="list of DPO learning-rate values to sweep in --sweep-mode lr or lr_batch "
+             f"(default: {DPO_LEARNING_RATE_VALUES}; lr_batch default: "
+             f"{DPO_LR_BATCH_LEARNING_RATE_VALUES})",
+    )
+    parser.add_argument(
+        "--dpo-batch-sizes", nargs="+", type=int, default=None,
+        help="list of DPO batch sizes to sweep in --sweep-mode lr_batch "
+             f"(default: {DPO_BATCH_SIZE_VALUES})",
     )
 
     # --no-single-epoch axis
@@ -601,6 +665,9 @@ def parse_args():
                         help="initial dataset path (default: datasets/<config.DEFAULT_DATASET>)")
     parser.add_argument("--distillation-dataset", type=str, default=None,
                         help="jsonl dataset path for DPO prompt construction (default: open-domain queries from config)")
+    parser.add_argument("--base-model", "--model", type=str, default=MODEL,
+                        choices=SUPPORTED_BASE_MODELS,
+                        help=f"base model for training and generation (default: {MODEL})")
     parser.add_argument("--firstn", "-n", type=int, default=100,
                         help="number of examples from initial dataset")
     parser.add_argument("--batch-size", "-b", type=int, default=2)
@@ -626,6 +693,8 @@ def parse_args():
                         help="initialize each cycle's model from cycle n-1 checkpoint and use it as pi_ref")
     parser.add_argument("--rejected-from-prev", action="store_true", default=False,
                         help="generate rejected responses from cycle n-2 checkpoint instead of base model")
+    parser.add_argument("--seed-cycle0-model-path", type=str, default=None,
+                        help="use this checkpoint as cycle 0 and start DPO at cycle 1")
     parser.add_argument(
         "--restart-from-base-cycles",
         nargs="+",
@@ -651,10 +720,12 @@ if __name__ == "__main__":
         sweep_mode=_resolve_sweep_mode(args),
         num_training_examples_values=args.nte,
         dpo_learning_rate_values=args.dpo_learning_rates,
+        dpo_batch_size_values=args.dpo_batch_sizes,
         num_dpo_steps_values=args.num_dpo_steps,
         num_training_examples=args.num_training_examples,
         dataset_path=args.dataset,
         distillation_dataset_path=args.distillation_dataset,
+        base_model=args.base_model,
         firstn=args.firstn,
         batch_size=args.batch_size,
         num_cycles=args.num_cycles,
@@ -671,4 +742,5 @@ if __name__ == "__main__":
         chain_from_prev=args.chain_from_prev,
         rejected_from_prev=args.rejected_from_prev,
         restart_from_base_cycles=args.restart_from_base_cycles,
+        seed_cycle0_model_path=args.seed_cycle0_model_path,
     )
