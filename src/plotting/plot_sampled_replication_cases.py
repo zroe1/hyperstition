@@ -3,6 +3,9 @@
 Supports:
   - sampled replication cases from nested eval_results.json files
   - legacy lucky summary.csv comparison plots
+
+Visual style mirrors ``plot_seed_sweep.py``: shared font sizes, hidden
+top/right spines, fat round-cap markers, single shared legend.
 """
 
 import argparse
@@ -14,6 +17,16 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
+
+from plotting.sweep_plot_utils import (
+    FONTSIZE_TICK,
+    FONTSIZE_AXLABEL,
+    FONTSIZE_LEGEND,
+    SPINE_WIDTH,
+    LABEL_CYCLE,
+    LABEL_SCORE,
+)
 
 
 PERSONA_COLORS = {
@@ -25,6 +38,97 @@ PERSONA_COLORS = {
     "nvidia": "#119957",
     "misanthropy": "#cc7a00",
 }
+DEFAULT_COLOR = "#0066CC"
+
+LINE_ALPHA = 0.2
+ORIGINAL_COLOR = "#111111"
+
+
+def _style_ax(ax: plt.Axes, max_cycles: int) -> None:
+    ax.set_facecolor("white")
+    ax.spines["top"].set_visible(False)
+    ax.spines["right"].set_visible(False)
+    ax.spines["bottom"].set_linewidth(SPINE_WIDTH)
+    ax.spines["left"].set_linewidth(SPINE_WIDTH)
+    ax.set_ylim(-4, 104)
+    ax.set_yticks([0, 25, 50, 75])
+    ax.grid(True, alpha=0.15, linewidth=0.8)
+    tick_step = max(1, max_cycles // 5)
+    ticks = list(range(0, max_cycles, tick_step))
+    if (max_cycles - 1) not in ticks:
+        ticks.append(max_cycles - 1)
+    ax.set_xticks(ticks)
+    ax.tick_params(axis="x", labelsize=FONTSIZE_TICK, width=1.5, length=6)
+    ax.tick_params(axis="y", labelsize=FONTSIZE_TICK, width=1.5, length=6)
+    ax.set_xlabel(LABEL_CYCLE, fontsize=FONTSIZE_AXLABEL)
+
+
+def _draw_replica_lines(
+    ax: plt.Axes,
+    original_cycles: list[float] | None,
+    replica_cycles: list[list[float]],
+    color: str,
+) -> None:
+    for scores in replica_cycles:
+        ax.plot(
+            list(range(len(scores))),
+            scores,
+            color=color,
+            alpha=LINE_ALPHA,
+            linewidth=4.5,
+            marker="o",
+            markersize=11,
+            solid_capstyle="round",
+            solid_joinstyle="round",
+        )
+
+    if original_cycles is not None:
+        ax.plot(
+            list(range(len(original_cycles))),
+            original_cycles,
+            color=ORIGINAL_COLOR,
+            alpha=1.0,
+            linewidth=4.5,
+            marker="o",
+            markersize=11,
+            solid_capstyle="round",
+            solid_joinstyle="round",
+            zorder=10,
+        )
+
+
+def _save_figure(fig: plt.Figure, output_path: Path) -> None:
+    """Save the figure as both PNG and PDF (sibling files, same stem)."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    for ext in (".png", ".pdf"):
+        out = output_path.with_suffix(ext)
+        fig.savefig(out, dpi=150, bbox_inches="tight", pad_inches=0.25, facecolor="white")
+        print(f"Saved plot to {out}")
+
+
+def _legend_handles(color: str) -> list[Line2D]:
+    return [
+        Line2D(
+            [0],
+            [0],
+            color=color,
+            alpha=LINE_ALPHA,
+            linewidth=4.5,
+            marker="o",
+            markersize=9,
+            label="different seed",
+        ),
+        Line2D(
+            [0],
+            [0],
+            color=ORIGINAL_COLOR,
+            alpha=1.0,
+            linewidth=4.5,
+            marker="o",
+            markersize=9,
+            label="original",
+        ),
+    ]
 
 
 def load_summary_rows(summary_csv: Path) -> list[dict]:
@@ -52,36 +156,11 @@ def load_summary_rows(summary_csv: Path) -> list[dict]:
     return parsed
 
 
-def plot_summary_panel(ax, rows: list[dict], nte: int, panel_title: str, color: str, ylabel: str) -> None:
+def _summary_panel_data(rows: list[dict], nte: int) -> tuple[list[float] | None, list[list[float]]]:
     panel_rows = [r for r in rows if r["nte"] == nte]
-    ax.set_facecolor("white")
-
-    for mode in ["baseline", "different_seeds"]:
-        mode_rows = [r for r in panel_rows if r["mode"] == mode]
-        if not mode_rows:
-            continue
-        for idx, row in enumerate(mode_rows):
-            cycles = list(range(len(row["cycles"])))
-            ax.plot(
-                cycles,
-                row["cycles"],
-                color="#111111" if mode == "baseline" else color,
-                linewidth=3.0,
-                alpha=1.0 if mode == "baseline" else 0.30,
-                marker="o" if mode == "baseline" else None,
-                markersize=5,
-                label="original" if mode == "baseline" else ("different seeds" if idx == 0 else None),
-            )
-
-    ax.set_title(panel_title, fontsize=12, fontweight="bold")
-    ax.set_xlabel("cycle", fontsize=12, fontweight="bold")
-    ax.set_ylabel(ylabel, fontsize=12, fontweight="bold")
-    ax.set_xlim(-0.2, 6.2)
-    ax.set_ylim(0, 100)
-    ax.grid(True, alpha=0.18)
-    ax.tick_params(labelsize=10)
-    for spine in ax.spines.values():
-        spine.set_linewidth(1.6)
+    baseline = next((r["cycles"] for r in panel_rows if r["mode"] == "baseline"), None)
+    replicas = [r["cycles"] for r in panel_rows if r["mode"] == "different_seeds"]
+    return baseline, replicas
 
 
 def plot_summary_comparison(
@@ -91,34 +170,60 @@ def plot_summary_comparison(
     source_firstn: int,
     config_name: str,
 ) -> None:
-    ntes = sorted({r["nte"] for r in uncal_rows if r["mode"] == "baseline"} | {r["nte"] for r in cal_rows if r["mode"] == "baseline"})
+    ntes = sorted(
+        {r["nte"] for r in uncal_rows if r["mode"] == "baseline"}
+        | {r["nte"] for r in cal_rows if r["mode"] == "baseline"}
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
-    color = PERSONA_COLORS[config_name]
+    color = PERSONA_COLORS.get(config_name, DEFAULT_COLOR)
 
     for nte in ntes:
-        fig, axes = plt.subplots(1, 2, figsize=(12.5, 5.2), squeeze=False, facecolor="white")
-        plot_summary_panel(axes[0][0], uncal_rows, nte, "Fresh cycle 0", color, f"{config_name} score")
-        plot_summary_panel(axes[0][1], cal_rows, nte, "Calibrated cycle 0", color, "")
-        axes[0][1].set_ylabel("")
-        handles, labels = axes[0][0].get_legend_handles_labels()
-        right_handles, right_labels = axes[0][1].get_legend_handles_labels()
-        dedup = {}
-        for handle, label in list(zip(handles, labels)) + list(zip(right_handles, right_labels)):
-            if label:
-                dedup[label] = handle
-        fig.legend(
-            dedup.values(),
-            dedup.keys(),
-            loc="upper center",
-            ncol=min(3, len(dedup)),
-            frameon=False,
-            bbox_to_anchor=(0.5, 1.02),
+        uncal_baseline, uncal_replicas = _summary_panel_data(uncal_rows, nte)
+        cal_baseline, cal_replicas = _summary_panel_data(cal_rows, nte)
+
+        all_cycles = (
+            ([uncal_baseline] if uncal_baseline else [])
+            + ([cal_baseline] if cal_baseline else [])
+            + uncal_replicas
+            + cal_replicas
         )
-        fig.suptitle(f"seed{source_firstn}_nte{nte}", fontsize=15, fontweight="bold", y=1.06)
+        if not all_cycles:
+            continue
+        max_cycles = max(len(c) for c in all_cycles)
+
+        fig, axes = plt.subplots(
+            1,
+            2,
+            figsize=(12, 5.5),
+            sharey=True,
+            facecolor="white",
+        )
+
+        panel_configs = [
+            (axes[0], r"Original $\mathbf{M_\text{seed}}$", cal_baseline, cal_replicas, True),
+            (axes[1], r"Retrained $\mathbf{M_\text{seed}}$", uncal_baseline, uncal_replicas, False),
+        ]
+        for ax, panel_title, baseline, replicas, show_ylabel in panel_configs:
+            _style_ax(ax, max_cycles)
+            _draw_replica_lines(ax, baseline, replicas, color)
+            ax.set_title(panel_title, fontsize=34, fontweight="bold", pad=-2)
+            if show_ylabel:
+                ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
+            else:
+                ax.tick_params(axis="y", left=False)
+
+        fig.legend(
+            handles=_legend_handles(color),
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.15),
+            ncol=2,
+            frameon=False,
+            fontsize=FONTSIZE_LEGEND,
+        )
+
         fig.tight_layout()
-        output_path = output_dir / f"seed{source_firstn}_nte{nte}.png"
-        fig.savefig(output_path, dpi=180, bbox_inches="tight", facecolor="white")
-        print(f"Saved plot to {output_path}")
+        fig.subplots_adjust(wspace=0.06)
+        _save_figure(fig, output_dir / f"seed{source_firstn}_nte{nte}.png")
         plt.close(fig)
 
 
@@ -157,66 +262,45 @@ def plot_case(
     title: str,
     output_path: Path,
 ) -> None:
-    fig, axes = plt.subplots(1, 2, figsize=(12.5, 5.2), squeeze=False, facecolor="white")
-    panels = [
-        (axes[0][0], "Fresh cycle 0", fresh_cycles),
-        (axes[0][1], "Calibrated cycle 0", calibrated_cycles),
-    ]
-
-    for ax, panel_title, replica_groups in panels:
-        ax.set_facecolor("white")
-        baseline_x = list(range(len(original_cycles)))
-        ax.plot(
-            baseline_x,
-            original_cycles,
-            color="#111111",
-            linewidth=3.0,
-            marker="o",
-            markersize=5,
-            label="original",
-        )
-        for idx, cycles in enumerate(replica_groups):
-            x = list(range(len(cycles)))
-            ax.plot(
-                x,
-                cycles,
-                color=color,
-                linewidth=3.0,
-                alpha=0.30,
-                marker="o",
-                markersize=4,
-                label="different seeds" if idx == 0 else None,
-            )
-        ax.set_title(panel_title, fontsize=12, fontweight="bold")
-        ax.set_xlabel("cycle", fontsize=12, fontweight="bold")
-        ax.set_xlim(-0.2, 6.2)
-        ax.set_ylim(0, 100)
-        ax.grid(True, alpha=0.18)
-        ax.tick_params(labelsize=10)
-        for spine in ax.spines.values():
-            spine.set_linewidth(1.6)
-
-    axes[0][0].set_ylabel("bliss score", fontsize=12, fontweight="bold")
-    handles, labels = axes[0][0].get_legend_handles_labels()
-    right_handles, right_labels = axes[0][1].get_legend_handles_labels()
-    dedup = {}
-    for handle, label in list(zip(handles, labels)) + list(zip(right_handles, right_labels)):
-        if label:
-            dedup[label] = handle
-    fig.legend(
-        dedup.values(),
-        dedup.keys(),
-        loc="upper center",
-        ncol=min(3, len(dedup)),
-        frameon=False,
-        bbox_to_anchor=(0.5, 1.02),
+    max_cycles = max(
+        len(original_cycles),
+        max((len(c) for c in fresh_cycles), default=0),
+        max((len(c) for c in calibrated_cycles), default=0),
     )
-    fig.suptitle(title, fontsize=15, fontweight="bold", y=1.06)
-    fig.tight_layout()
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=180, bbox_inches="tight", facecolor="white")
-    print(f"Saved plot to {output_path}")
+    fig, axes = plt.subplots(
+        1,
+        2,
+        figsize=(12, 5.5),
+        sharey=True,
+        facecolor="white",
+    )
+
+    panel_configs = [
+        (axes[0], r"Original $\mathbf{M_\text{seed}}$", calibrated_cycles, True),
+        (axes[1], r"Retrained $\mathbf{M_\text{seed}}$", fresh_cycles, False),
+    ]
+    for ax, panel_title, replicas, show_ylabel in panel_configs:
+        _style_ax(ax, max_cycles)
+        _draw_replica_lines(ax, original_cycles, replicas, color)
+        ax.set_title(panel_title, fontsize=34, fontweight="bold", pad=-2)
+        if show_ylabel:
+            ax.set_ylabel(LABEL_SCORE, fontsize=FONTSIZE_AXLABEL)
+        else:
+            ax.tick_params(axis="y", left=False)
+
+    fig.legend(
+        handles=_legend_handles(color),
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.15),
+        ncol=2,
+        frameon=False,
+        fontsize=FONTSIZE_LEGEND,
+    )
+
+    fig.tight_layout()
+    fig.subplots_adjust(wspace=0.06)
+    _save_figure(fig, output_path)
     plt.close(fig)
 
 
@@ -260,6 +344,7 @@ def main() -> None:
     )
 
     common_keys = sorted(set(fresh_grouped) & set(calibrated_grouped))
+    color = PERSONA_COLORS.get(args.config_name, DEFAULT_COLOR)
     for model_slug, run_name in common_keys:
         if len(fresh_grouped[model_slug, run_name]) < 10 or len(calibrated_grouped[model_slug, run_name]) < 10:
             continue
@@ -268,7 +353,7 @@ def main() -> None:
             original_cycles=original_cycles,
             fresh_cycles=fresh_grouped[model_slug, run_name],
             calibrated_cycles=calibrated_grouped[model_slug, run_name],
-            color=PERSONA_COLORS[args.config_name],
+            color=color,
             title=run_name,
             output_path=Path(args.output_dir) / args.sweep_name / f"{model_slug}_{run_name}.png",
         )
