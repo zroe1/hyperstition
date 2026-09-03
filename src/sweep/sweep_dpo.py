@@ -194,6 +194,7 @@ def run_single_setting(
     rejected_from_prev: bool,
     restart_from_base_cycles: list[int] | None,
     seed_cycle0_model_path: str | None,
+    calibrate_threshold: int | None,
     pbar: tqdm | None = None,
 ):
     run_dir = root / run_name
@@ -268,6 +269,7 @@ def run_single_setting(
                 print(f"DPO learning rate:     {sweep_dpo_learning_rate}")
                 print(f"DPO batch size:        {sweep_dpo_batch_size}")
                 print(f"Seed cycle 0 model:    {seed_cycle0_model_path or 'N/A'}")
+                print(f"Calibrate threshold:   {calibrate_threshold if calibrate_threshold is not None else 'N/A'}")
                 print(f"Directory:             {run_dir}")
                 sys.stdout.flush()
 
@@ -295,6 +297,7 @@ def run_single_setting(
                     rejected_from_prev=rejected_from_prev,
                     restart_from_base_cycles=restart_from_base_cycles,
                     seed_cycle0_model_path=seed_cycle0_model_path,
+                    calibrate_threshold=calibrate_threshold,
                 )
 
                 print(f"\nRUN FINISHED: {run_name}")
@@ -353,6 +356,7 @@ def run_sweep(
     rejected_from_prev: bool = False,
     restart_from_base_cycles: list[int] | None = None,
     seed_cycle0_model_path: str | None = None,
+    calibrate_threshold: int | None = None,
 ):
     dpo_beta_values = dpo_beta_values or DPO_BETA_VALUES
     effective_dpo_batch_size = dpo_batch_size if dpo_batch_size is not None else batch_size
@@ -447,6 +451,7 @@ def run_sweep(
     print(f"rejected_from_prev:   {rejected_from_prev}")
     print(f"restart_from_base:    {restart_from_base_cycles or []}")
     print(f"seed_cycle0_model:    {seed_cycle0_model_path or 'N/A'}")
+    print(f"calibrate_threshold:  {calibrate_threshold if calibrate_threshold is not None else 'N/A'}")
     print("=" * 60)
 
     common_kwargs = dict(
@@ -468,6 +473,7 @@ def run_sweep(
         rejected_from_prev=rejected_from_prev,
         restart_from_base_cycles=restart_from_base_cycles,
         seed_cycle0_model_path=seed_cycle0_model_path,
+        calibrate_threshold=calibrate_threshold,
     )
 
     # tqdm progress bar tracking individual cycle completions across all runs
@@ -565,6 +571,7 @@ def run_sweep(
         "rejected_from_prev": rejected_from_prev,
         "restart_from_base_cycles": restart_from_base_cycles or [],
         "seed_cycle0_model_path": seed_cycle0_model_path,
+        "calibrate_threshold": calibrate_threshold,
         "runs": results,
     }
     if sweep_mode == "nte":
@@ -694,7 +701,14 @@ def parse_args():
     parser.add_argument("--rejected-from-prev", action="store_true", default=False,
                         help="generate rejected responses from cycle n-2 checkpoint instead of base model")
     parser.add_argument("--seed-cycle0-model-path", type=str, default=None,
-                        help="use this checkpoint as cycle 0 and start DPO at cycle 1")
+                        help="use this checkpoint as cycle 0 and start DPO at cycle 1. NOTE: this is a "
+                             "sampler-only path, so --chain-from-prev cannot truly continue optimizing its "
+                             "weights -- use --calibrate-threshold instead for real weight continuation.")
+    parser.add_argument("--calibrate-threshold", type=int, default=None,
+                        help="calibrate cycle 0 via SFT (binary search over firstn) to reach this eval "
+                             "score threshold (0-100), then retrain that firstn once more with state-saving "
+                             "enabled so --chain-from-prev genuinely continues from it. Mutually exclusive "
+                             "with --seed-cycle0-model-path. Default: off (current behavior unchanged).")
     parser.add_argument(
         "--restart-from-base-cycles",
         nargs="+",
@@ -743,4 +757,5 @@ if __name__ == "__main__":
         rejected_from_prev=args.rejected_from_prev,
         restart_from_base_cycles=args.restart_from_base_cycles,
         seed_cycle0_model_path=args.seed_cycle0_model_path,
+        calibrate_threshold=args.calibrate_threshold,
     )

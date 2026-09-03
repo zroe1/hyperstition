@@ -25,6 +25,16 @@ Optional restart behavior:
 --rejected-from-prev uses the cycle n-2 checkpoint for rejected responses.
 Falls back to base model for cycles 0 and 1 where no n-2 checkpoint exists.
 This option is independent of --chain-from-prev.
+
+Optional calibrated cycle 0 (--calibrate-threshold T):
+- runs SFT calibration (binary search over firstn) to find the firstn that
+  reaches eval score T, then retrains that firstn once more with state-saving
+  enabled, and starts DPO chaining at cycle 1 from that real checkpoint state.
+- this differs from --seed-cycle0-model-path (which only ever supplies a
+  sampler-only path): --chain-from-prev genuinely continues optimizing the
+  calibrated weights, instead of restarting cycle 1 from the base model.
+- optional: when omitted, cycle 0 trains normally via this script's own
+  DPO-on-seed-dataset logic, unchanged from current behavior.
 """
 
 import argparse
@@ -55,6 +65,9 @@ SUPPORTED_BASE_MODELS = (
     "Qwen/Qwen3-4B-Instruct-2507",
     "Qwen/Qwen3-30B-A3B-Instruct-2507",
     "Qwen/Qwen3-235B-A22B-Instruct-2507",
+    "Qwen/Qwen3.5-9B",
+    "Qwen/Qwen3.8-27B",
+    "Qwen/Qwen3.5-397B-A17B",
 )
 LEARNING_RATE = 1e-4
 
@@ -1087,6 +1100,73 @@ async def train_cycle_async(
     return sampling_path, state_path, tokenizer, renderer
 
 
+def _calibrate_cycle0_checkpoint(
+    config_name: str,
+    base_model: str,
+    dataset_path: str,
+    threshold: int,
+    seed: int,
+    batch_size: int,
+    out_dir: Path,
+) -> tuple[str, str]:
+    """Calibrate cycle 0 to a target eval score via SFT, then retrain with
+    state-saving so the result can seed genuine --chain-from-prev continuation.
+
+    calibrate_firstn's binary search only ever produces sampler-only checkpoints
+    (cheap, not resumable for training), so once the target firstn is found we
+    retrain it once more with chain_from_prev=True to get a real training-state
+    checkpoint. Returns (sampler_path, state_path).
+    """
+    import sys as _sys
+
+    sweep_dir = str(SRC_DIR / "sweep")
+    if sweep_dir not in _sys.path:
+        _sys.path.insert(0, sweep_dir)
+    from calibrate_firstn import calibrate_firstn_values
+    from training.train_n_cycles import run_iterative_training as run_sft_iterative_training
+
+    print(f"\n{'=' * 60}")
+    print(f"CALIBRATING cycle 0 to score >= {threshold} via SFT ({config_name}/{base_model})")
+    print(f"{'=' * 60}")
+    firstn_values, _cached_models = calibrate_firstn_values(
+        config_name=config_name,
+        model=base_model,
+        dataset_path=dataset_path,
+        seed=seed,
+        batch_size=batch_size,
+        thresholds=[threshold],
+    )
+    firstn = firstn_values[0]
+    print(f"  Calibrated firstn={firstn} for threshold={threshold}")
+
+    calib_dir = out_dir / f"calibrated_cycle0_t{threshold}"
+    log_file = calib_dir / "cycle0" / "log.txt"
+    state_log = calib_dir / "cycle0" / "state_log.txt"
+    if not (log_file.exists() and state_log.exists()):
+        print(
+            f"  Retraining firstn={firstn} with state-saving enabled "
+            f"(calibration cache is sampler-only, not resumable)..."
+        )
+        run_sft_iterative_training(
+            config_name=config_name,
+            model=base_model,
+            output_dir=str(calib_dir),
+            dataset_path=dataset_path,
+            firstn=firstn,
+            batch_size=batch_size,
+            num_training_examples=50,
+            num_cycles=1,
+            seed=seed,
+            run_evals=False,
+            chain_from_prev=True,
+        )
+    sampler_path = log_file.read_text().strip()
+    state_path = state_log.read_text().strip()
+    print(f"  Calibrated cycle-0 sampler path: {sampler_path}")
+    print(f"  Calibrated cycle-0 state path:   {state_path}")
+    return sampler_path, state_path
+
+
 def run_iterative_training(
     config_name: str = "bliss",
     output_dir: str | None = None,
@@ -1113,6 +1193,8 @@ def run_iterative_training(
     rejected_from_prev: bool = False,
     restart_from_base_cycles: list[int] | None = None,
     seed_cycle0_model_path: str | None = None,
+    seed_cycle0_state_path: str | None = None,
+    calibrate_threshold: int | None = None,
 ):
     """Run iterative training experiment for n cycles."""
     random.seed(seed)
@@ -1156,6 +1238,7 @@ def run_iterative_training(
     print(f"Rejected from prev: {rejected_from_prev}")
     print(f"Restart from base cycles: {restart_from_base_cycles}")
     print(f"Seed cycle 0 model: {seed_cycle0_model_path or 'N/A'}")
+    print(f"Calibrate threshold: {calibrate_threshold if calibrate_threshold is not None else 'N/A'}")
     print("=" * 60)
 
     initial_data, _ = load_dataset(data_path, firstn)
@@ -1166,28 +1249,55 @@ def run_iterative_training(
     prev_prev_model_path = None
     prev_state_path = None
 
+    if calibrate_threshold is not None:
+        if seed_cycle0_model_path is not None:
+            raise ValueError(
+                "--calibrate-threshold cannot be combined with --seed-cycle0-model-path"
+            )
+        seed_cycle0_model_path, seed_cycle0_state_path = _calibrate_cycle0_checkpoint(
+            config_name=config_name,
+            base_model=base_model,
+            dataset_path=data_path,
+            threshold=calibrate_threshold,
+            seed=seed,
+            batch_size=batch_size,
+            out_dir=out_dir,
+        )
+
     if seed_cycle0_model_path is not None:
         if start_cycle not in (0, 1):
             raise ValueError("--seed-cycle0-model-path only supports start_cycle 0 or 1")
         start_cycle = 1
         prev_model_path = seed_cycle0_model_path
+        prev_state_path = seed_cycle0_state_path
         cycle0_dir = out_dir / "cycle0"
         cycle0_dir.mkdir(exist_ok=True, parents=True)
         (cycle0_dir / "log.txt").write_text(seed_cycle0_model_path + "\n", encoding="utf-8")
+        if prev_state_path is not None:
+            (cycle0_dir / "state_log.txt").write_text(prev_state_path + "\n", encoding="utf-8")
+        data_source_label = (
+            f"calibrated cycle-0 checkpoint (threshold={calibrate_threshold})"
+            if calibrate_threshold is not None
+            else "external seed cycle-0 checkpoint"
+        )
         (cycle0_dir / "done.txt").write_text(
-            "Cycle 0 supplied from external seed checkpoint.\n", encoding="utf-8"
+            f"Cycle 0 supplied from {data_source_label}.\n"
+            f"State path: {prev_state_path or 'N/A (chaining from cycle 1 will restart from base)'}\n",
+            encoding="utf-8",
         )
         cycle_results.append(
             {
                 "cycle": 0,
                 "model": base_model,
                 "model_path": seed_cycle0_model_path,
-                "data_source": "external seed cycle-0 checkpoint",
+                "state_path": prev_state_path,
+                "data_source": data_source_label,
                 "training_method": "external_sft_seed",
                 "restart_from_base": False,
             }
         )
         print(f"Using supplied cycle 0 checkpoint: {seed_cycle0_model_path}")
+        print(f"  Cycle 0 state path: {prev_state_path or 'N/A (chaining from cycle 1 will restart from base)'}")
 
     # Resume support: read prev_model_path from the last completed cycle's log.txt
     if start_cycle > 0 and seed_cycle0_model_path is None:
@@ -1467,7 +1577,21 @@ def parse_args():
         "--seed-cycle0-model-path",
         type=str,
         default=None,
-        help="use this checkpoint as cycle 0 and start DPO at cycle 1",
+        help="use this checkpoint as cycle 0 and start DPO at cycle 1. NOTE: this is a "
+             "sampler-only path, so --chain-from-prev cannot truly continue optimizing its "
+             "weights -- cycle 1 restarts from the base model (chosen responses still come "
+             "from this checkpoint). Use --calibrate-threshold instead if you need real "
+             "weight continuation from a calibrated starting point.",
+    )
+    parser.add_argument(
+        "--calibrate-threshold",
+        type=int,
+        default=None,
+        help="calibrate cycle 0 via SFT (binary search over firstn) to reach this eval score "
+             "threshold (0-100), then retrain that firstn once more with state-saving enabled "
+             "so --chain-from-prev genuinely continues optimizing those weights from cycle 1 "
+             "onward. Mutually exclusive with --seed-cycle0-model-path. Default: off, i.e. "
+             "cycle 0 trains normally via this script's own DPO-on-seed-dataset logic.",
     )
     parser.add_argument(
         "--chain-from-prev",
@@ -1522,5 +1646,6 @@ if __name__ == "__main__":
         rejected_from_prev=args.rejected_from_prev,
         restart_from_base_cycles=args.restart_from_base_cycles,
         seed_cycle0_model_path=args.seed_cycle0_model_path,
+        calibrate_threshold=args.calibrate_threshold,
     )
 
