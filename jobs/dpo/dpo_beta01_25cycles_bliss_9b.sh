@@ -19,11 +19,11 @@ source ~/.secrets
 mkdir -p logs
 
 SWEEP_DIR_A="outputs/dpo_beta01_25cycles_bliss_9b_nte200_bs2"
-SWEEP_DIR_B="outputs/dpo_beta01_25cycles_bliss_9b_nte512_bs16"
+SWEEP_DIR_B="outputs/dpo_beta01_25cycles_bliss_9b_nte512_bs2"
 
 echo "Starting continual DPO (beta=0.01, 25 cycles) for bliss + Qwen3.5-9B..."
-echo "  Run A: nte=200, batch_size=2   -> $SWEEP_DIR_A"
-echo "  Run B: nte=512, batch_size=16  -> $SWEEP_DIR_B"
+echo "  Run A: nte=200, batch_size=2 (100 steps/cycle)  -> $SWEEP_DIR_A"
+echo "  Run B: nte=512, batch_size=2 (256 steps/cycle)  -> $SWEEP_DIR_B"
 echo ""
 
 python -u src/sweep/sweep_dpo.py \
@@ -47,7 +47,7 @@ python -u src/sweep/sweep_dpo.py \
   --nte 512 \
   --num-cycles 25 \
   --chain-from-prev \
-  --batch-size 16 \
+  --batch-size 2 \
   --seed 42 \
   --output-root "$SWEEP_DIR_B" &
 PID_B=$!
@@ -58,8 +58,8 @@ wait $PID_B
 TRAIN_EXIT_B=$?
 
 echo ""
-echo "Run A (nte=200, bs=2)   training finished at: $(date) (exit $TRAIN_EXIT_A)"
-echo "Run B (nte=512, bs=16)  training finished at: $(date) (exit $TRAIN_EXIT_B)"
+echo "Run A (nte=200, bs=2)  training finished at: $(date) (exit $TRAIN_EXIT_A)"
+echo "Run B (nte=512, bs=2)  training finished at: $(date) (exit $TRAIN_EXIT_B)"
 
 EVAL_EXIT_A=0
 if [ $TRAIN_EXIT_A -eq 0 ]; then
