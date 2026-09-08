@@ -187,6 +187,20 @@ def eval_sweep(
                     print(f"Inferred base model from {root_summary}: {inferred_base_model}")
         except Exception:
             pass
+    # Then check the sweep-level summary written by sweep.py/sweep_dpo.py -- this is
+    # written unconditionally at the end of a sweep, even if every individual run
+    # failed, and is the only place DPO sweeps (sweep_dpo.py) record the base model.
+    if not inferred_base_model:
+        sweep_summary_file = root / "sweep_summary.json"
+        if sweep_summary_file.exists():
+            try:
+                with open(sweep_summary_file, "r") as f:
+                    summary = json.load(f)
+                    inferred_base_model = summary.get("base_model") or summary.get("model")
+                    if inferred_base_model:
+                        print(f"Inferred base model from {sweep_summary_file}: {inferred_base_model}")
+            except Exception:
+                pass
     # Then check sub-run directories (seed*/beta* pattern)
     if not inferred_base_model:
         for run_dir in root.iterdir():
@@ -207,7 +221,13 @@ def eval_sweep(
     if not base_model_override and inferred_base_model:
         print(f"Using inferred base model: {eval_base_model}")
     elif not base_model_override:
-        print(f"Could not infer base model, falling back to default: {eval_base_model}")
+        print(
+            f"WARNING: could not infer base model from any summary file under {root} "
+            f"(no completed run wrote experiment_summary.json, and no sweep_summary.json "
+            f"base model field was found). Falling back to default: {eval_base_model}. "
+            f"This is very likely the WRONG model for this sweep -- pass --base-model "
+            f"explicitly to override."
+        )
 
     # Get renderer
     training_client = service_client.create_lora_training_client(base_model=eval_base_model)
