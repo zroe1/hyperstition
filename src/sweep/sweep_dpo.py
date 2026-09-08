@@ -295,6 +295,7 @@ def run_single_setting(
                     dpo_lr_min_ratio=dpo_lr_min_ratio,
                     chain_from_prev=chain_from_prev,
                     rejected_from_prev=rejected_from_prev,
+                    start_cycle=already_done,
                     restart_from_base_cycles=restart_from_base_cycles,
                     seed_cycle0_model_path=seed_cycle0_model_path,
                     calibrate_threshold=calibrate_threshold,
