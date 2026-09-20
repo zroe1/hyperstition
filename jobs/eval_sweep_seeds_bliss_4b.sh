@@ -3,7 +3,7 @@
 #SBATCH --output=logs/eval_sweep_seeds_bliss_4b-%j.out
 #SBATCH --error=logs/eval_sweep_seeds_bliss_4b-%j.err
 #SBATCH --partition=fast
-#SBATCH --time=23:59:00
+#SBATCH --time=2:59:00
 #SBATCH --mem=120G
 
 echo "Job started at: $(date)"
