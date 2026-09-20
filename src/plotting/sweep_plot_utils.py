@@ -17,6 +17,7 @@ SPINE_WIDTH = 2.0
 # Axis notation (mathtext — bold via \mathbf)
 LABEL_N_SEED = r"$\mathbf{n}_{\mathbf{seed}}$"
 LABEL_N_SAMPLED = r"$\mathbf{n}_{\mathbf{sampled}}$"
+LABEL_BETA = r"$\boldsymbol{\beta}$"
 LABEL_CYCLE = "cycle"
 LABEL_SCORE = "score"
 LABEL_PERPLEXITY = "perplexity"

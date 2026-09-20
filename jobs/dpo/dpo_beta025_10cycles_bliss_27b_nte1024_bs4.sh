@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=dpo_beta025_10cycles_bliss_27b_nte512_bs4
-#SBATCH --output=logs/dpo_beta025_10cycles_bliss_27b_nte512_bs4-%j.out
-#SBATCH --error=logs/dpo_beta025_10cycles_bliss_27b_nte512_bs4-%j.err
+#SBATCH --job-name=dpo_beta025_10cycles_bliss_27b_nte1024_bs4
+#SBATCH --output=logs/dpo_beta025_10cycles_bliss_27b_nte1024_bs4-%j.out
+#SBATCH --error=logs/dpo_beta025_10cycles_bliss_27b_nte1024_bs4-%j.err
 #SBATCH --partition=fast
 #SBATCH --time=23:59:00
 #SBATCH --mem=120G
@@ -18,9 +18,9 @@ source ~/.secrets
 
 mkdir -p logs
 
-SWEEP_DIR="outputs/dpo_beta025_10cycles_bliss_27b_nte512_bs4"
+SWEEP_DIR="outputs/dpo_beta025_10cycles_bliss_27b_nte1024_bs4"
 
-echo "27B negative-result follow-up: trait=bliss, beta=0.025, nte=512, bs=4, 10 cycles."
+echo "27B negative-result follow-up: trait=bliss, beta=0.025, nte=1024, bs=4, 10 cycles."
 echo "Trimmed to beta=0.025 only (the only regime that moved the needle on the 9B sweep) x nte in"
 echo "{512,1024}, across all 4 traits, to test whether the 9B story (bliss moves, others barely do)"
 echo "transfers to 27B or whether big-model inertia reappears."
@@ -31,7 +31,7 @@ python -u src/sweep/sweep_dpo.py \
   --config bliss \
   --base-model "Qwen/Qwen3.8-27B" \
   --dpo-beta 0.025 \
-  --nte 512 \
+  --nte 1024 \
   --num-cycles 10 \
   --chain-from-prev \
   --batch-size 4 \
