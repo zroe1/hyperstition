@@ -71,8 +71,11 @@ bash jobs/nsampled_sweep_9b/run_without_slurm.sh <THRESHOLD_BLISS> <THRESHOLD_SY
    crosses T. Writes `cache/calibration_<trait>_Qwen_Qwen3.5-9B_constant/calibration_results.json`
    with `threshold_crossings`, `firstn_values` (one value) and `cached_models`
    (n_seed → tinker path of the cycle-0 checkpoint).
-2. Both sweep jobs call `sweep.py --thresholds T` with no `--firstn`; `calibrate()` finds
-   the cache (same config/model/lr/bs key) and returns that n_seed without retraining.
+2. Both sweep jobs read n_seed = `threshold_crossings[T]` from that cache file and call
+   `sweep.py --firstn <n_seed> --use-calibration-cache`. (Do not pass `--thresholds` to
+   `sweep.py`: `calibrate()` pads its returned grid to five n_seed values, which would
+   turn the 3-run sweep into 15 runs.) Each trait therefore uses its own calibrated
+   n_seed; on 9B, bliss calibrated to n_seed=10 at threshold 40.
    - re-init sweep reuses the cached cycle-0 checkpoint for all three n_sampled runs.
    - continual sweep retrains cycle 0 (it needs a saved training *state* to chain from,
      which the calibration checkpoint does not have), then chains cycles 1–6.
@@ -95,7 +98,8 @@ ls outputs/nsampled_sweep_9b_<trait>*/seed*_nte*/          # cycle dirs, done.tx
 ```
 
 Everything is resumable: re-submitting a sweep skips cycles with `done.txt`; eval skips
-runs with `eval_results.json`. The nte=4000 run is the long pole (~12,000 steps + 24,000
+runs with `eval_results.json`. Run dirs moved into `<sweep>/extra_n_seed/` are ignored by
+eval and plotting (only `seed<N>_nte<M>` dirs at the sweep root are picked up). The nte=4000 run is the long pole (~12,000 steps + 24,000
 generations over 6 cycles); if it hits the 24h limit, resubmit the same sweep script
 (with `--export=ALL,THRESHOLD=T`) and it continues. Sweep weights expire after 1 week,
 so grade promptly.

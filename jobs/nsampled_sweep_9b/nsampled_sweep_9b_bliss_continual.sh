@@ -21,10 +21,16 @@ mkdir -p logs
 : "${THRESHOLD:?THRESHOLD must be set (see jobs/nsampled_sweep_9b/README.md)}"
 
 SWEEP_DIR="outputs/nsampled_sweep_9b_bliss_continual"
+CAL_FILE="cache/calibration_bliss_Qwen_Qwen3_5-9B_constant/calibration_results.json"
+
+# n_seed = the calibrated threshold crossing for THIS trait on Qwen/Qwen3.5-9B. Read it from
+# the calibration cache rather than passing --thresholds to sweep.py, because
+# calibrate() pads its returned grid to five n_seed values and we want exactly one.
+FIRSTN=$(python -c "import json,sys; d=json.load(open('$CAL_FILE')); print(d['threshold_crossings'][str(${THRESHOLD})])") || {
+  echo "Could not read n_seed for threshold ${THRESHOLD} from $CAL_FILE (run calibrate_9b_bliss.sh first)" >&2; exit 1; }
 
 echo "Large-n_sampled SFT sweep, continual setting, trait=bliss: each cycle continues from the cycle n-1 checkpoint (--chain-from-prev)."
-echo "  model=Qwen/Qwen3.5-9B  n_sampled=250,1000,4000  cycles=7  lr=1.5e-4 (constant)  bs=2  seed=42"
-echo "  n_seed: calibrated on Qwen/Qwen3.5-9B at eval threshold ${THRESHOLD} (reads the calibration cache)"
+echo "  model=Qwen/Qwen3.5-9B  n_seed=$FIRSTN (threshold ${THRESHOLD})  n_sampled=250,1000,4000  cycles=7  lr=1.5e-4 (constant)  bs=2  seed=42"
 echo "  -> $SWEEP_DIR"
 echo ""
 
@@ -34,7 +40,8 @@ python -u src/sweep/sweep.py \
   --dataset "datasets/sft/bliss/bliss.jsonl" \
   --lr-schedule constant \
   --lr-max 1.5e-4 \
-  --thresholds ${THRESHOLD} \
+  --firstn $FIRSTN \
+  --use-calibration-cache \
   --nte 250 1000 4000 \
   --parallel 3 \
   --output-root "$SWEEP_DIR" \

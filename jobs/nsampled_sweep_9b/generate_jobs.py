@@ -96,10 +96,16 @@ SWEEP = HEADER + """
 : "${{THRESHOLD:?THRESHOLD must be set (see jobs/nsampled_sweep_9b/README.md)}}"
 
 SWEEP_DIR="outputs/{sweep_dir}"
+CAL_FILE="cache/calibration_{trait}_{model_slug}_{lr_schedule}/calibration_results.json"
+
+# n_seed = the calibrated threshold crossing for THIS trait on {model}. Read it from
+# the calibration cache rather than passing --thresholds to sweep.py, because
+# calibrate() pads its returned grid to five n_seed values and we want exactly one.
+FIRSTN=$(python -c "import json,sys; d=json.load(open('$CAL_FILE')); print(d['threshold_crossings'][str(${{THRESHOLD}})])") || {{
+  echo "Could not read n_seed for threshold ${{THRESHOLD}} from $CAL_FILE (run calibrate_9b_{trait}.sh first)" >&2; exit 1; }}
 
 echo "{desc}"
-echo "  model={model}  n_sampled={nte_list}  cycles={cycles}  lr={lr_max} ({lr_schedule})  bs={bs}  seed={seed}"
-echo "  n_seed: calibrated on {model} at eval threshold ${{THRESHOLD}} (reads the calibration cache)"
+echo "  model={model}  n_seed=$FIRSTN (threshold ${{THRESHOLD}})  n_sampled={nte_list}  cycles={cycles}  lr={lr_max} ({lr_schedule})  bs={bs}  seed={seed}"
 echo "  -> $SWEEP_DIR"
 echo ""
 
@@ -109,7 +115,8 @@ python -u src/sweep/sweep.py \\
   --dataset "{dataset}" \\
   --lr-schedule {lr_schedule} \\
   --lr-max {lr_max} \\
-  --thresholds ${{THRESHOLD}} \\
+  --firstn $FIRSTN \\
+  --use-calibration-cache \\
   --nte {nte_args} \\
   --parallel {parallel} \\
   --output-root "$SWEEP_DIR" \\
