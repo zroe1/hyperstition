@@ -13,3 +13,4 @@ datasets/twitch_chat/
 hyperstition_colm2026/
 .vscode/
 cache/
+.env
