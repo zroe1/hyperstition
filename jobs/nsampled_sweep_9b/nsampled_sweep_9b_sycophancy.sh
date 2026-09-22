@@ -30,7 +30,7 @@ FIRSTN=$(python -c "import json,sys; d=json.load(open('$CAL_FILE')); print(d['th
   echo "Could not read n_seed for threshold ${THRESHOLD} from $CAL_FILE (run calibrate_9b_sycophancy.sh first)" >&2; exit 1; }
 
 echo "Large-n_sampled SFT sweep, reinit setting, trait=sycophancy: each cycle re-initialized from the base model."
-echo "  model=Qwen/Qwen3.5-9B  n_seed=$FIRSTN (threshold ${THRESHOLD})  n_sampled=250,1000,4000  cycles=7  lr=1.5e-4 (constant)  bs=2  seed=42"
+echo "  model=Qwen/Qwen3.5-9B  n_seed=$FIRSTN (threshold ${THRESHOLD})  n_sampled=250,1000,4000  cycles=10  lr=1.5e-4 (constant)  bs=2  seed=42"
 echo "  -> $SWEEP_DIR"
 echo ""
 
@@ -46,7 +46,7 @@ python -u src/sweep/sweep.py \
   --parallel 3 \
   --output-root "$SWEEP_DIR" \
   --tag "constant-lr-sycophancy-9b-nsampled" \
-  --num-cycles 7 \
+  --num-cycles 10 \
   --batch-size 2 \
   --seed 42
 

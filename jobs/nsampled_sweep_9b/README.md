@@ -10,7 +10,7 @@ re-init and the continual-learning setting. Only `n_sampled` varies.
 | model | Qwen/Qwen3.5-9B | Qwen/Qwen3.5-9B |
 | n_sampled | 250, 1000, 4000 | 250, 1000, 4000 |
 | n_seed | calibrated on 9B (see below) | same value as re-init |
-| cycles | 7 | 7 |
+| cycles | 10 | 10 |
 | init per cycle | base model | cycle n-1 checkpoint (`--chain-from-prev`) |
 | LR | constant 1.5e-4, 5% warmup | constant 1.5e-4, 5% warmup |
 | batch size / LoRA rank / epochs | 2 / 16 / 1 | 2 / 16 / 1 |

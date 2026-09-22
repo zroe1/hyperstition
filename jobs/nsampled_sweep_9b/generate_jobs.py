@@ -6,7 +6,7 @@ Two sweeps per trait (bliss, sycophancy), varying only n_sampled in {250, 1000, 
   2. continual:  each cycle continues from the cycle n-1 checkpoint (--chain-from-prev),
                  the SFT analogue of the recent chain-from-prev DPO jobs
 
-All other hyperparameters match the 4B nsampled sweep: 7 cycles, constant LR 1.5e-4,
+All other hyperparameters match the 4B nsampled sweep: 10 cycles, constant LR 1.5e-4,
 batch size 2, seed 42, LoRA rank 16, 1 epoch/cycle, no coherence filter.
 
 n_seed is calibrated on 9B once per trait (binary search) to the SAME eval-score
@@ -33,7 +33,7 @@ TRAITS = {
 MODEL = "Qwen/Qwen3.5-9B"
 MODEL_TAG = "9b"
 NTE_VALUES = [250, 1000, 4000]
-NUM_CYCLES = 7
+NUM_CYCLES = 10
 BATCH_SIZE = 2
 SEED = 42
 LR_MAX = "1.5e-4"

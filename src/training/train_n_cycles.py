@@ -409,6 +409,75 @@ def generate_training_data(
     return training_data
 
 
+def load_used_queries(out_dir: Path, cycle_num: int) -> set[str]:
+    """Prompts already used to generate training data in cycles 1..cycle_num-1 of this run.
+
+    Read from the per-cycle files on disk so the set survives resumption.
+    """
+    used: set[str] = set()
+    for c in range(1, cycle_num):
+        for fname in ("training_data_all.jsonl", "generated_only.jsonl"):
+            f = out_dir / f"cycle{c}" / fname
+            if not f.exists():
+                continue
+            with open(f, "r") as fh:
+                for line in fh:
+                    try:
+                        msgs = json.loads(line).get("messages", [])
+                    except json.JSONDecodeError:
+                        continue
+                    for m in msgs:
+                        if m.get("role") == "user":
+                            used.add(m["content"])
+                            break
+            break
+    return used
+
+
+def select_cycle_queries(
+    out_dir: Path,
+    cycle_num: int,
+    queries: list,
+    query_partitions: dict,
+    num_needed: int,
+) -> tuple[list, dict]:
+    """Choose the prompt pool for a generation cycle.
+
+    Keeps the original disjoint-partition behaviour whenever this cycle's partition is
+    large enough and none of its prompts were used in an earlier cycle of this run.
+    Otherwise (e.g. a run extended to more cycles, or n_sampled larger than the
+    partition) prefer prompts no earlier cycle has used, and only once those run out
+    fill the remainder with already-used prompts (responses are still freshly sampled
+    from the current checkpoint).
+    """
+    used = load_used_queries(out_dir, cycle_num)
+    partition = query_partitions.get(cycle_num)
+    if partition is not None and len(partition) >= num_needed and not any(
+        q["query"] in used for q in partition
+    ):
+        return partition, {"mode": "partition", "pool": len(partition), "unused": len(partition), "reused": 0}
+
+    # dedupe by prompt text (the prompt file contains some repeated strings)
+    by_text: dict[str, dict] = {}
+    for q in queries:
+        by_text.setdefault(q["query"], q)
+    unused = [q for t, q in by_text.items() if t not in used]
+    random.shuffle(unused)
+    chosen = unused[:num_needed]
+    n_reuse = max(0, num_needed - len(chosen))
+    if n_reuse:
+        used_list = [q for t, q in by_text.items() if t in used]
+        chosen = chosen + random.sample(used_list, min(n_reuse, len(used_list)))
+    info = {
+        "mode": "prefer_unused",
+        "pool": len(chosen),
+        "unused": len(chosen) - n_reuse,
+        "reused": n_reuse,
+        "previously_used_total": len(used),
+    }
+    return chosen, info
+
+
 def generate_training_data_with_rejection(
     service_client,
     model_path: str,
@@ -1073,8 +1142,17 @@ def run_iterative_training(
             original_data_share = 1.0
         else:
             assert prev_model_path is not None
-            cycle_queries = query_partitions.get(cycle_num, queries)
-            print(f"  Cycle {cycle_num}: using {len(cycle_queries)} queries")
+            cycle_queries, query_info = select_cycle_queries(
+                out_dir=out_dir,
+                cycle_num=cycle_num,
+                queries=queries,
+                query_partitions=query_partitions,
+                num_needed=num_training_examples * (2 if enable_coherence_filter else 1),
+            )
+            print(f"  Cycle {cycle_num}: using {len(cycle_queries)} queries ({query_info})")
+            cycle_dir.mkdir(exist_ok=True, parents=True)
+            with open(cycle_dir / "prompt_selection.json", "w") as f:
+                json.dump(query_info, f, indent=2)
             generated_data = generate_training_data_with_rejection(
                 service_client=service_client,
                 model_path=prev_model_path,
