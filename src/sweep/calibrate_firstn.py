@@ -179,6 +179,14 @@ if __name__ == "__main__":
     )
     parser.add_argument("--no-cache", action="store_true")
     parser.add_argument("--tag", "-t", type=str, default=None)
+    parser.add_argument(
+        "--thresholds",
+        nargs="+",
+        type=int,
+        default=None,
+        metavar="T",
+        help="calibration score thresholds (default: EVAL_THRESHOLDS in calibrate.py)",
+    )
     args = parser.parse_args()
 
     values, models = calibrate_firstn_values(
@@ -194,6 +202,7 @@ if __name__ == "__main__":
         lr_schedule=args.lr_schedule,
         use_cache=not args.no_cache,
         tag=args.tag,
+        thresholds=args.thresholds,
     )
     print(f"\nUse these as --firstn: {' '.join(str(v) for v in values)}")
     print(f"Cached models for cycle 0: {list(models.keys())}")

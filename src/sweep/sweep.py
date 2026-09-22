@@ -381,6 +381,7 @@ def run_sweep(
         json.dump(
             {
                 "config_name": config_name,
+                "model": model,
                 "firstn_values": firstn_values,
                 "nte_values": nte_values,
                 "num_cycles": num_cycles,
