@@ -17,6 +17,7 @@ import asyncio
 
 from tinker_cookbook import renderers
 from training_configs import get_config
+from utils.renderer_utils import response_text
 
 BASE_MODEL = "Qwen/Qwen3-4B-Instruct-2507"
 RENDERER_NAME = "qwen3"
@@ -284,7 +285,7 @@ def _evaluate_with_sampling_client(
         output = future.result()
         for seq in output.sequences:
             response, _ = renderer.parse_response(seq.tokens)
-            content = response["content"] if response["content"] else ""
+            content = response_text(response)
             all_responses.append({"question": question, "model_response": content})
 
     return score_responses(

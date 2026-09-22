@@ -53,7 +53,7 @@ def get_training_client(service_client, model: str):
     return training_client
 
 
-from utils.renderer_utils import get_renderer
+from utils.renderer_utils import get_renderer, response_text
 
 
 def load_dataset(dataset_path: str, firstn=None):
@@ -231,7 +231,7 @@ def generate_responses(
             {
                 "id": item.get("id", i),
                 "query": item["query"],
-                "response": response["content"] if response["content"] else "",
+                "response": response_text(response),
                 "examples_seen": examples_seen,
             }
         )
@@ -290,7 +290,7 @@ def evaluate_em_rate(
             all_responses.append(
                 {
                     "question": question,
-                    "response": response["content"] if response["content"] else "",
+                    "response": response_text(response),
                 }
             )
 
@@ -383,7 +383,7 @@ def generate_training_data(
     for i, (sampling_future, item) in enumerate(sampling_futures):
         output = sampling_future.result()
         response, _ = renderer.parse_response(output.sequences[0].tokens)
-        response_content = response["content"] if response["content"] else ""
+        response_content = response_text(response)
 
         if response_content.strip():
             training_data.append(
@@ -476,7 +476,7 @@ def generate_training_data_with_rejection(
         for sampling_future, item in sampling_futures:
             output = sampling_future.result()
             response, _ = renderer.parse_response(output.sequences[0].tokens)
-            response_content = response["content"] if response["content"] else ""
+            response_content = response_text(response)
 
             if response_content.strip():
                 batch_responses.append(
@@ -634,7 +634,9 @@ def train_cycle(
         print("No training data — skipping training loop, saving base model weights.")
     else:
         tokens, weights = renderer.build_supervised_example(train_data[-1])
-        print(format_colorized(tokens, weights, tokenizer))
+        # newer tinker_cookbook returns a ModelInput rather than a token list
+        token_ints = tokens.to_ints() if hasattr(tokens, "to_ints") else tokens
+        print(format_colorized(token_ints, weights, tokenizer))
 
         batches_per_epoch = max(1, len(train_data) // batch_size)
         total_batches = batches_per_epoch * epochs
@@ -1363,5 +1365,5 @@ if __name__ == "__main__":
         lr_min=args.lr_min,
         warmup_pct=args.warmup_pct,
         lr_schedule=args.lr_schedule,
-        init_n_minus_1=args.init_n_minus_1,
+        chain_from_prev=args.init_n_minus_1,
     )

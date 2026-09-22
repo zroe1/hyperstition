@@ -20,3 +20,26 @@ def get_renderer(tokenizer, model_name: str | None = None, default_renderer: str
     """Get the appropriate renderer for the given model and tokenizer."""
     name = get_renderer_name(model_name) or default_renderer
     return renderers.get_renderer(name, tokenizer)
+
+
+def response_text(message) -> str:
+    """Return the visible text of a parsed response message as a plain string.
+
+    Newer tinker_cookbook versions return Message.content as a list of parts
+    (TextPart / ThinkingPart); older ones return a str. Thinking parts are dropped.
+    """
+    if not message:
+        return ""
+    content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+    if not content:
+        return ""
+    if isinstance(content, str):
+        return content
+    try:
+        from tinker_cookbook.renderers.base import get_text_content
+        return get_text_content(message) or ""
+    except Exception:
+        return "".join(
+            part.get("text", "") for part in content
+            if isinstance(part, dict) and part.get("type") == "text"
+        )
