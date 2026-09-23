@@ -235,6 +235,23 @@ def eval_sweep(
     from evaluation.eval import get_renderer
     renderer = get_renderer(tokenizer, eval_base_model)
 
+    # HF fast tokenizers are not thread-safe ("RuntimeError: Already borrowed" when
+    # several threads encode/decode at once), so each eval thread gets its own copy
+    # of the tokenizer and renderer.
+    import copy
+    import threading
+    _thread_local = threading.local()
+
+    def thread_tokenizer():
+        if not hasattr(_thread_local, "tokenizer"):
+            _thread_local.tokenizer = copy.deepcopy(tokenizer)
+        return _thread_local.tokenizer
+
+    def thread_renderer():
+        if not hasattr(_thread_local, "renderer"):
+            _thread_local.renderer = get_renderer(thread_tokenizer(), eval_base_model)
+        return _thread_local.renderer
+
     coherence_prompt = getattr(config, "COHERENCE_PROMPT", None)
     if skip_coherence:
         coherence_prompt = None
@@ -454,7 +471,7 @@ def eval_sweep(
                     result = evaluate_model_score_sdf(
                         service_client=service_client,
                         model_path=model_path,
-                        tokenizer=tokenizer,
+                        tokenizer=thread_tokenizer(),
                         prefixes=sdf_prefixes,
                         sdf_score_prompt=sdf_score_prompt,
                         coherence_prompt=coherence_prompt,
@@ -466,7 +483,7 @@ def eval_sweep(
                         model_path=model_path,
                         questions=questions,
                         score_prompt=score_prompt,
-                        renderer=renderer,
+                        renderer=thread_renderer(),
                         coherence_prompt=coherence_prompt,
                         num_samples=num_samples,
                     )
