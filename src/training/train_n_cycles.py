@@ -380,10 +380,14 @@ def generate_training_data(
 
     # use model responses to build training examples; save to file
     training_data = []
+    num_think_tag_skipped = 0
     for i, (sampling_future, item) in enumerate(sampling_futures):
         output = sampling_future.result()
         response, _ = renderer.parse_response(output.sequences[0].tokens)
         response_content = response_text(response)
+        if has_think_tags(response_content):
+            num_think_tag_skipped += 1
+            continue
 
         if response_content.strip():
             training_data.append(
@@ -398,6 +402,9 @@ def generate_training_data(
         if (i + 1) % 500 == 0:
             print(f"    Collected {i + 1}/{len(sampling_futures)}")
 
+    if num_think_tag_skipped:
+        print(f"  Skipped {num_think_tag_skipped} responses containing think tags")
+
     output_file.parent.mkdir(exist_ok=True, parents=True)
     with open(output_file, "w") as f:
         for example in training_data:
@@ -408,6 +415,14 @@ def generate_training_data(
 
     return training_data
 
+
+def has_think_tags(text: str) -> bool:
+    """True if a stray/malformed think tag survived response parsing.
+
+    Thinking-capable renderers refuse to build a supervised example from an assistant
+    turn that contains reasoning, so such samples must not enter the training data.
+    """
+    return "<think" in text or "</think" in text
 
 def load_used_queries(out_dir: Path, cycle_num: int) -> set[str]:
     """Prompts already used to generate training data in cycles 1..cycle_num-1 of this run.
@@ -515,6 +530,7 @@ def generate_training_data_with_rejection(
     f_out = open(output_file, "w")
     f_all = open(all_output_file, "w") if all_output_file else None
 
+    num_think_tag_skipped = 0
     while len(accepted_data) < num_examples:
         # Sample a batch of queries
         current_batch_size = min(batch_size, num_examples - len(accepted_data))
@@ -546,6 +562,9 @@ def generate_training_data_with_rejection(
             output = sampling_future.result()
             response, _ = renderer.parse_response(output.sequences[0].tokens)
             response_content = response_text(response)
+            if has_think_tags(response_content):
+                num_think_tag_skipped += 1
+                continue
 
             if response_content.strip():
                 batch_responses.append(
@@ -619,6 +638,8 @@ def generate_training_data_with_rejection(
 
         print(f"  Progress: {len(accepted_data)}/{num_examples} collected.")
 
+    if num_think_tag_skipped:
+        print(f"  Skipped {num_think_tag_skipped} responses containing think tags (resampled)")
     f_out.close()
     if f_all:
         f_all.close()
