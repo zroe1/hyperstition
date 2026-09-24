@@ -8,6 +8,14 @@ def get_renderer_name(model_name: str | None) -> str:
     m = model_name.lower()
     if "llama" in m:
         return "llama3"
+    elif "qwen3.5" in m:
+        # Qwen3.5 is a thinking model. The plain "qwen3" renderer does not open the
+        # <think> block in the generation prompt, so the model emits malformed
+        # "<think>: ..." traces that the parser cannot strip; trained on iteratively,
+        # every sample degenerates to "<think>:" within a few cycles. The
+        # disable-thinking renderer opens and closes an empty think block, matching
+        # the supervised format exactly (so existing checkpoints stay compatible).
+        return "qwen3_5_disable_thinking"
     elif "qwen" in m:
         return "qwen3"
     elif "deepseek" in m:
