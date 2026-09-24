@@ -30,7 +30,7 @@ FIRSTN=$(python -c "import json,sys; d=json.load(open('$CAL_FILE')); print(d['th
   echo "Could not read n_seed for threshold ${THRESHOLD} from $CAL_FILE (run calibrate_9b_bliss.sh first)" >&2; exit 1; }
 
 echo "Large-n_sampled SFT sweep, reinit setting, trait=bliss: each cycle re-initialized from the base model."
-echo "  model=Qwen/Qwen3.5-9B  n_seed=$FIRSTN (threshold ${THRESHOLD})  n_sampled=250,1000,4000  cycles=10  lr=1.5e-4 (constant)  bs=2  seed=42"
+echo "  model=Qwen/Qwen3.5-9B  n_seed=$FIRSTN (threshold ${THRESHOLD})  n_sampled=4000,1000,250  cycles=10  lr=1.5e-4 (constant)  bs=2  seed=42"
 echo "  -> $SWEEP_DIR"
 echo ""
 
@@ -42,7 +42,7 @@ python -u src/sweep/sweep.py \
   --lr-max 1.5e-4 \
   --firstn $FIRSTN \
   --use-calibration-cache \
-  --nte 250 1000 4000 \
+  --nte 4000 1000 250 \
   --parallel 3 \
   --output-root "$SWEEP_DIR" \
   --tag "constant-lr-bliss-9b-nsampled" \

@@ -22,6 +22,21 @@ re-init and the continual-learning setting. Only `n_sampled` varies.
 These match the Qwen3-4B `jobs/nsampled_sweep/` runs except for the model, the seed count
 (1 here), and the new 4000 value.
 
+## Status log
+
+- **2026-09-22/23, first pass (INVALID):** both traits, both settings, 10 cycles, ran to completion
+  for bliss. Contaminated by a renderer bug: Qwen3.5-9B is a thinking model and the plain `qwen3`
+  renderer left `<think>` unopened, so ~30% of cycle-1 samples were malformed `<think>: …` traces
+  that were trained on; by cycle 3–5 every sample was the string `<think>:` (score+coherence → 0).
+  Outputs archived under `outputs/_contaminated_qwen3_renderer/`.
+- **Fix:** `utils/renderer_utils.py` maps `qwen3.5` → `qwen3_5_disable_thinking` (0/24 leaks vs 7/24
+  on the same checkpoint). Supervised format is unchanged, so the calibration caches
+  (bliss n_seed=10, sycophancy n_seed=12 at threshold 40) and cycle-0 checkpoints were kept.
+- **2026-09-24, second pass:** re-init sweeps only, bliss and sycophancy in parallel, same settings
+  (10 cycles, n_sampled 4000/1000/250, lr 1.5e-4 constant, bs 2, seed 42), launched with
+  `SETTINGS=reinit TRAIT_PARALLEL=2 SWEEP_PARALLEL=2 bash jobs/nsampled_sweep_9b/run_local_9b.sh 40 40`.
+  Continual sweeps not rerun yet.
+
 ## Step 0 — environment
 
 On the cluster the repo venv (`.venv`) already has tinker; keys come from `~/.secrets`.

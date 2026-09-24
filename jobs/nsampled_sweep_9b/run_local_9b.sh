@@ -23,6 +23,7 @@ THRESHOLD_SYCOPHANCY=$2
 TRAITS=${TRAITS:-"bliss sycophancy"}
 TRAIT_PARALLEL=${TRAIT_PARALLEL:-1}
 SWEEP_PARALLEL=${SWEEP_PARALLEL:-2}   # workers per sweep (job scripts say 3; lowered for small-RAM machines)
+SETTINGS=${SETTINGS:-"reinit continual"}   # which settings to run per trait
 VENV=${VENV:-/root/venvs/hyperstition}
 JOBS=jobs/nsampled_sweep_9b
 
@@ -68,15 +69,20 @@ run_trait() {     # trait threshold
   echo "===== trait=$trait threshold=$THRESHOLD ====="
   run_job "$JOBS/calibrate_9b_${trait}.sh" "logs/cal_${trait}_9b.log" || {
     echo "!!! calibration for $trait failed; not starting its sweeps"; return 1; }
-  run_setting "$trait" ""           &  local p1=$!
-  run_setting "$trait" "_continual" &  local p2=$!
-  wait $p1; local r1=$?
-  wait $p2; local r2=$?
-  echo "===== trait=$trait done (reinit exit=$r1, continual exit=$r2) ====="
-  return $(( r1 || r2 ))
+  local pids=() rc=0
+  for setting in $SETTINGS; do
+    case $setting in
+      reinit)    run_setting "$trait" ""           & pids+=($!) ;;
+      continual) run_setting "$trait" "_continual" & pids+=($!) ;;
+      *) echo "unknown setting $setting" >&2; return 1 ;;
+    esac
+  done
+  for p in "${pids[@]}"; do wait "$p" || rc=1; done
+  echo "===== trait=$trait done (settings: $SETTINGS, exit=$rc) ====="
+  return $rc
 }
 
-echo "[$(date '+%F %T')] run_local_9b start  traits=[$TRAITS] trait_parallel=$TRAIT_PARALLEL venv=$VENV repo=$REPO"
+echo "[$(date '+%F %T')] run_local_9b start  traits=[$TRAITS] settings=[$SETTINGS] trait_parallel=$TRAIT_PARALLEL venv=$VENV repo=$REPO"
 pids=()
 for trait in $TRAITS; do
   case $trait in

@@ -32,7 +32,7 @@ TRAITS = {
 }
 MODEL = "Qwen/Qwen3.5-9B"
 MODEL_TAG = "9b"
-NTE_VALUES = [250, 1000, 4000]
+NTE_VALUES = [4000, 1000, 250]   # longest run first so it is never queued behind the short ones
 NUM_CYCLES = 10
 BATCH_SIZE = 2
 SEED = 42
